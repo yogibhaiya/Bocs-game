@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* Leaflet dark mode overrides */
+.leaflet-container {
+  background: #09090b !important;
+  font-family: inherit;
+}
+
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: #18181b !important;
+  color: #fff !important;
+  border: 1px solid #27272a;
+}
+
+.leaflet-popup-content {
+  margin: 12px;
+}
+
+/* Hide attribution for cleaner look in game */
+.leaflet-control-attribution {
+  display: none !important;
+}

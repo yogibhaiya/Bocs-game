@@ -1,0 +1,7 @@
+{
+  "name": "BOCS",
+  "description": "Real-time multiplayer squad-based shooting game using GPS.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}

@@ -1,0 +1,83 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A player in the game.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "lastActive": { "type": "string", "format": "date-time" },
+        "health": { "type": "number" },
+        "ammo": { "type": "number" },
+        "coins": { "type": "number" },
+        "squadId": { "type": "string" },
+        "gunQuality": { "type": "string", "enum": ["cheap", "standard", "expensive"] },
+        "shieldUntil": { "type": "string", "format": "date-time" },
+        "invisibleUntil": { "type": "string", "format": "date-time" },
+        "autoMissiles": { "type": "number" }
+      },
+      "required": ["uid", "displayName", "health", "ammo", "coins", "gunQuality", "autoMissiles"]
+    },
+    "Squad": {
+      "title": "Squad",
+      "description": "A team of players.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "leaderId": { "type": "string" },
+        "score": { "type": "number" },
+        "avatarUrl": { "type": "string" }
+      },
+      "required": ["id", "name", "leaderId", "score"]
+    },
+    "Treasure": {
+      "title": "Treasure",
+      "description": "A lootable item on the map.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "coins": { "type": "number" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "lat", "lng", "coins", "active", "createdAt"]
+    },
+    "Territory": {
+      "title": "Territory",
+      "description": "A conquerable area on the map.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerSquadId": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" }
+      },
+      "required": ["id", "ownerSquadId", "lat", "lng"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores player profiles and real-time state."
+    },
+    "/squads/{squadId}": {
+      "schema": { "$ref": "#/entities/Squad" },
+      "description": "Stores squad information."
+    },
+    "/treasures/{treasureId}": {
+      "schema": { "$ref": "#/entities/Treasure" },
+      "description": "Stores active treasures on the map."
+    },
+    "/territories/{territoryId}": {
+      "schema": { "$ref": "#/entities/Territory" },
+      "description": "Stores territory ownership."
+    }
+  }
+}
