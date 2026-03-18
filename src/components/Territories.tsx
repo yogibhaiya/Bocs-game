@@ -1,0 +1,66 @@
+import React from 'react';
+import { Territory, Squad, User } from '../types';
+
+interface TerritoriesProps {
+  user: User;
+  territories: Territory[];
+  squads: Squad[];
+  onClose: () => void;
+}
+
+export default function Territories({ user, territories, squads, onClose }: TerritoriesProps) {
+  const userSquad = squads.find(s => s.id === user.squadId);
+  const myTerritories = territories.filter(t => t.ownerSquadId === user.squadId);
+
+  return (
+    <div className="absolute inset-0 bg-zinc-950 z-50 overflow-y-auto p-4 flex flex-col">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-black text-white uppercase tracking-wider">Territories</h2>
+        <button onClick={onClose} className="text-zinc-500 hover:text-white font-bold">CLOSE</button>
+      </div>
+
+      {!user.squadId ? (
+        <div className="text-center text-zinc-500 mt-10">
+          <p>You must join a squad to view and capture territories.</p>
+        </div>
+      ) : (
+        <>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 mb-6">
+            <h3 className="text-emerald-400 font-bold mb-2">Your Squad: {userSquad?.name}</h3>
+            <p className="text-zinc-400 text-sm">Territories Controlled: <span className="text-white font-mono">{myTerritories.length}</span></p>
+          </div>
+
+          <h3 className="text-lg font-bold text-white mb-4">All Territories</h3>
+          <div className="space-y-3">
+            {territories.length === 0 ? (
+              <p className="text-zinc-500 text-center text-sm">No territories claimed yet.</p>
+            ) : (
+              territories.map(t => {
+                const owner = squads.find(s => s.id === t.ownerSquadId);
+                const isMine = t.ownerSquadId === user.squadId;
+                
+                return (
+                  <div key={t.id} className={`p-4 rounded-xl border ${isMine ? 'bg-emerald-900/20 border-emerald-800' : 'bg-zinc-900 border-zinc-800'}`}>
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <p className="font-bold text-white flex items-center gap-2">
+                          🚩 {owner?.name || 'Unknown Squad'}
+                        </p>
+                        <p className="text-xs text-zinc-500 font-mono mt-1">
+                          {t.lat.toFixed(4)}, {t.lng.toFixed(4)}
+                        </p>
+                      </div>
+                      {isMine && (
+                        <span className="text-xs font-bold text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded">YOURS</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

@@ -9,10 +9,22 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
 export const loginWithGoogle = async () => {
   const provider = new GoogleAuthProvider();
+  
+  // Force account selection to prevent auto-login loops
+  provider.setCustomParameters({
+    prompt: 'select_account'
+  });
+
   try {
-    await signInWithPopup(auth, provider);
-  } catch (error) {
-    console.error("Error signing in with Google", error);
+    const result = await signInWithPopup(auth, provider);
+    const user = result.user;
+    console.log("Successfully logged in:", user.displayName, user.email);
+    return user;
+  } catch (error: any) {
+    console.error("Google Sign-In Error:");
+    console.error("Code:", error.code);
+    console.error("Message:", error.message);
+    throw error;
   }
 };
 

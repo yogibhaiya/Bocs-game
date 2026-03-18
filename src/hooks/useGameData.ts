@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { collection, doc, onSnapshot, setDoc, updateDoc, query, where, getDocs, serverTimestamp, increment, DocumentSnapshot } from 'firebase/firestore';
+import { useState, useEffect, useRef } from 'react';
+import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, query, where, getDocs, serverTimestamp, increment, DocumentSnapshot } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { User, Squad, Treasure, Territory } from '../types';
 import { useGeolocation } from './useGeolocation';
@@ -79,7 +79,22 @@ export const useGameData = () => {
     if (!user) return;
     const unsub = onSnapshot(doc(db, 'users', user.uid), (snapshot) => {
       if (snapshot.exists()) {
-        setCurrentUser(snapshot.data() as User);
+        const data = snapshot.data() as User;
+        
+        // Migrate old users
+        let needsUpdate = false;
+        const updates: any = {};
+        
+        if (data.ammo === undefined) { updates.ammo = 50; needsUpdate = true; data.ammo = 50; }
+        if (data.coins === undefined) { updates.coins = 100; needsUpdate = true; data.coins = 100; }
+        if (data.gunQuality === undefined) { updates.gunQuality = 'cheap'; needsUpdate = true; data.gunQuality = 'cheap'; }
+        if (data.autoMissiles === undefined) { updates.autoMissiles = 0; needsUpdate = true; data.autoMissiles = 0; }
+        
+        if (needsUpdate) {
+          updateDoc(doc(db, 'users', user.uid), updates).catch(e => console.error("Migration error:", e));
+        }
+        
+        setCurrentUser(data);
       } else {
         // Create initial user
         const newUser: User = {
@@ -158,10 +173,47 @@ export const useGameData = () => {
     return () => unsub();
   }, [isAuthReady]);
 
+  // Bot movement logic
+  const playersRef = useRef(players);
+  useEffect(() => {
+    playersRef.current = players;
+  }, [players]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    
+    const interval = setInterval(() => {
+      const bots = playersRef.current.filter(p => p.uid.startsWith('bot_') && p.health > 0);
+      
+      bots.forEach(async (bot) => {
+        // Move bots randomly by a small amount (~10-20 meters)
+        const latOffset = (Math.random() - 0.5) * 0.0002;
+        const lngOffset = (Math.random() - 0.5) * 0.0002;
+        
+        try {
+          await updateDoc(doc(db, 'users', bot.uid), {
+            lat: bot.lat + latOffset,
+            lng: bot.lng + lngOffset,
+            lastActive: new Date().toISOString()
+          });
+        } catch (error) {
+          // Ignore errors for bot movement to avoid spamming console if deleted
+        }
+      });
+    }, 3000); // Move every 3 seconds
+
+    return () => clearInterval(interval);
+  }, [currentUser?.uid]);
+
   const attackPlayer = async (enemy: User, useMissile: boolean = false) => {
     if (!currentUser) return;
+    if (currentUser.health <= 0) {
+      alert("You are eliminated! Buy a health pack from the shop to respawn.");
+      return;
+    }
     if (!useMissile && currentUser.ammo <= 0) return;
     if (useMissile && currentUser.autoMissiles <= 0) return;
+    if (enemy.health <= 0) return; // Cannot attack dead players
 
     try {
       const distance = getDistance(
@@ -169,7 +221,10 @@ export const useGameData = () => {
         { latitude: enemy.lat, longitude: enemy.lng }
       );
 
-      if (!useMissile && distance > 100) return; // Out of range for normal attack
+      if (!useMissile && distance > 100) {
+        alert("Target is out of range!");
+        return;
+      }
 
       // Check if enemy has shield
       if (enemy.shieldUntil && new Date(enemy.shieldUntil) > new Date()) {
@@ -212,9 +267,13 @@ export const useGameData = () => {
       }
 
       // Update enemy health
-      await updateDoc(doc(db, 'users', enemy.uid), {
-        health: newHealth
-      });
+      if (newHealth === 0 && enemy.uid.startsWith('bot_')) {
+        await deleteDoc(doc(db, 'users', enemy.uid));
+      } else {
+        await updateDoc(doc(db, 'users', enemy.uid), {
+          health: newHealth
+        });
+      }
 
       // If killed, reward coins
       if (newHealth === 0) {
@@ -228,12 +287,18 @@ export const useGameData = () => {
         }
       }
     } catch (error) {
+      console.error("Attack failed:", error);
+      alert("Attack failed! Please check your connection or try again.");
       handleFirestoreError(error, OperationType.UPDATE, `users/${enemy.uid}`);
     }
   };
 
   const collectTreasure = async (treasure: Treasure) => {
     if (!currentUser) return;
+    if (currentUser.health <= 0) {
+      alert("You are eliminated! Buy a health pack from the shop to respawn.");
+      return;
+    }
 
     try {
       const distance = getDistance(
@@ -293,6 +358,93 @@ export const useGameData = () => {
     }
   };
 
+  const claimTerritory = async () => {
+    if (!currentUser || !currentUser.squadId) {
+      alert("You must be in a squad to claim territory!");
+      return;
+    }
+    if (currentUser.health <= 0) {
+      alert("You are eliminated! Buy a health pack from the shop to respawn.");
+      return;
+    }
+
+    const userSquad = squads.find(s => s.id === currentUser.squadId);
+    if (!userSquad || userSquad.leaderId !== currentUser.uid) {
+      alert("Only squad leaders can purchase/claim territories!");
+      return;
+    }
+
+    if (currentUser.coins < 100) {
+      alert("You need 100 Box Coins to buy a territory!");
+      return;
+    }
+
+    // Check if already in a territory capture zone (200m)
+    const existingTerritory = territories.find(t => 
+      getDistance({ latitude: currentUser.lat, longitude: currentUser.lng }, { latitude: t.lat, longitude: t.lng }) <= 200
+    );
+
+    try {
+      if (existingTerritory) {
+        // Capture existing
+        if (existingTerritory.ownerSquadId !== currentUser.squadId) {
+          await updateDoc(doc(db, 'users', currentUser.uid), { coins: increment(-100) });
+          await updateDoc(doc(db, 'territories', existingTerritory.id), {
+            ownerSquadId: currentUser.squadId
+          });
+          alert("Territory captured!");
+        } else {
+          alert("Your squad already owns this territory!");
+        }
+      } else {
+        // Create new
+        await updateDoc(doc(db, 'users', currentUser.uid), { coins: increment(-100) });
+        const newId = `territory_${Date.now()}`;
+        await setDoc(doc(db, 'territories', newId), {
+          id: newId,
+          ownerSquadId: currentUser.squadId,
+          lat: currentUser.lat,
+          lng: currentUser.lng
+        });
+        alert("New territory purchased and claimed!");
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'territories');
+    }
+  };
+
+  const spawnBots = async () => {
+    if (!currentUser) return;
+    
+    const botIds = ['bot_1', 'bot_2', 'bot_3'];
+    try {
+      for (let i = 0; i < botIds.length; i++) {
+        const botRef = doc(db, 'users', botIds[i]);
+        // Spawn within ~80m of user
+        const latOffset = (Math.random() - 0.5) * 0.0015;
+        const lngOffset = (Math.random() - 0.5) * 0.0015;
+        
+        await setDoc(botRef, {
+          uid: botIds[i],
+          displayName: `Training Bot ${i+1}`,
+          email: `bot${i}@example.com`,
+          photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=bot${i}`,
+          lat: currentUser.lat + latOffset,
+          lng: currentUser.lng + lngOffset,
+          health: 100,
+          coins: 50,
+          ammo: 10,
+          autoMissiles: 0,
+          gunQuality: 'standard',
+          lastActive: new Date().toISOString()
+        });
+      }
+      alert("Training bots spawned nearby!");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'users');
+    }
+  };
+
   return {
     currentUser,
     players,
@@ -301,6 +453,8 @@ export const useGameData = () => {
     territories,
     attackPlayer,
     collectTreasure,
-    buyItem
+    buyItem,
+    claimTerritory,
+    spawnBots
   };
 };

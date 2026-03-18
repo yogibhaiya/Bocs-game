@@ -6,13 +6,16 @@ import HUD from './components/HUD';
 import Shop from './components/Shop';
 import Squad from './components/Squad';
 import Leaderboard from './components/Leaderboard';
-import { ShoppingCart, Users, Trophy, LogOut, Map as MapIcon } from 'lucide-react';
+import Profile from './components/Profile';
+import Territories from './components/Territories';
+import { ShoppingCart, Users, Trophy, LogOut, Map as MapIcon, UserCircle, Flag } from 'lucide-react';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [activeTab, setActiveTab] = useState<'map' | 'shop' | 'squad' | 'leaderboard'>('map');
+  const [activeTab, setActiveTab] = useState<'map' | 'shop' | 'squad' | 'leaderboard' | 'profile' | 'territories'>('map');
+  const [authError, setAuthError] = useState<string | null>(null);
   
-  const { currentUser, players, squads, treasures, territories, attackPlayer, collectTreasure, buyItem } = useGameData();
+  const { currentUser, players, squads, treasures, territories, attackPlayer, collectTreasure, buyItem, claimTerritory, spawnBots } = useGameData();
 
   useEffect(() => {
     const unsub = auth.onAuthStateChanged((user) => {
@@ -20,6 +23,20 @@ export default function App() {
     });
     return () => unsub();
   }, []);
+
+  const [loginSuccess, setLoginSuccess] = useState<string | null>(null);
+
+  const handleLogin = async () => {
+    setAuthError(null);
+    setLoginSuccess(null);
+    try {
+      const user = await loginWithGoogle();
+      setLoginSuccess(`Successfully signed in as ${user.displayName}`);
+      // The onAuthStateChanged listener will handle setting isAuthenticated
+    } catch (error: any) {
+      setAuthError(error.message || "An unknown error occurred during sign in.");
+    }
+  };
 
   if (!isAuthenticated) {
     return (
@@ -43,8 +60,27 @@ export default function App() {
             </div>
           </div>
 
+          {authError && (
+            <div className="mb-6 p-4 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 text-sm text-left">
+              <p className="font-bold mb-1">Authentication Error</p>
+              <p>{authError}</p>
+              {authError.includes('configuration-not-found') && (
+                <p className="mt-2 text-xs text-red-300">
+                  Please go to your Firebase Console &gt; Authentication &gt; Sign-in method, and enable the Google provider.
+                </p>
+              )}
+            </div>
+          )}
+
+          {loginSuccess && (
+            <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/50 rounded-lg text-emerald-400 text-sm text-left">
+              <p className="font-bold mb-1">Success</p>
+              <p>{loginSuccess}</p>
+            </div>
+          )}
+
           <button 
-            onClick={loginWithGoogle}
+            onClick={handleLogin}
             className="w-full py-4 bg-white text-black rounded-xl font-bold text-lg hover:bg-gray-200 transition-colors flex items-center justify-center gap-3"
           >
             <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6" />
@@ -73,21 +109,33 @@ export default function App() {
             <GameMap 
               currentUser={currentUser} 
               players={players} 
+              squads={squads}
               treasures={treasures} 
               territories={territories}
               onAttack={attackPlayer}
               onCollectTreasure={collectTreasure}
+              onClaimTerritory={claimTerritory}
             />
           </>
         )}
         {activeTab === 'shop' && <Shop user={currentUser} onBuy={buyItem} onClose={() => setActiveTab('map')} />}
         {activeTab === 'squad' && <Squad user={currentUser} squads={squads} players={players} onClose={() => setActiveTab('map')} />}
         {activeTab === 'leaderboard' && <Leaderboard squads={squads} onClose={() => setActiveTab('map')} />}
+        {activeTab === 'profile' && <Profile user={currentUser} onSpawnBots={spawnBots} onClose={() => setActiveTab('map')} />}
+        {activeTab === 'territories' && <Territories user={currentUser} territories={territories} squads={squads} onClose={() => setActiveTab('map')} />}
       </div>
 
       {/* Bottom Navigation */}
       <div className="bg-zinc-950 border-t border-zinc-900 pb-safe z-20">
         <div className="flex justify-around items-center p-2">
+          <button 
+            onClick={() => setActiveTab('profile')}
+            className={`flex flex-col items-center p-2 rounded-xl transition-colors ${activeTab === 'profile' ? 'text-purple-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+          >
+            <UserCircle className="w-6 h-6 mb-1" />
+            <span className="text-[10px] font-bold uppercase tracking-wider">Profile</span>
+          </button>
+
           <button 
             onClick={() => setActiveTab('map')}
             className={`flex flex-col items-center p-2 rounded-xl transition-colors ${activeTab === 'map' ? 'text-cyan-400' : 'text-zinc-500 hover:text-zinc-300'}`}
@@ -103,6 +151,14 @@ export default function App() {
             <Users className="w-6 h-6 mb-1" />
             <span className="text-[10px] font-bold uppercase tracking-wider">Squad</span>
           </button>
+
+          <button 
+            onClick={() => setActiveTab('territories')}
+            className={`flex flex-col items-center p-2 rounded-xl transition-colors ${activeTab === 'territories' ? 'text-red-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+          >
+            <Flag className="w-6 h-6 mb-1" />
+            <span className="text-[10px] font-bold uppercase tracking-wider">Territory</span>
+          </button>
           
           <button 
             onClick={() => setActiveTab('shop')}
@@ -111,21 +167,13 @@ export default function App() {
             <ShoppingCart className="w-6 h-6 mb-1" />
             <span className="text-[10px] font-bold uppercase tracking-wider">Shop</span>
           </button>
-          
+
           <button 
             onClick={() => setActiveTab('leaderboard')}
             className={`flex flex-col items-center p-2 rounded-xl transition-colors ${activeTab === 'leaderboard' ? 'text-orange-400' : 'text-zinc-500 hover:text-zinc-300'}`}
           >
             <Trophy className="w-6 h-6 mb-1" />
             <span className="text-[10px] font-bold uppercase tracking-wider">Rank</span>
-          </button>
-
-          <button 
-            onClick={logout}
-            className="flex flex-col items-center p-2 rounded-xl text-zinc-500 hover:text-red-400 transition-colors"
-          >
-            <LogOut className="w-6 h-6 mb-1" />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Exit</span>
           </button>
         </div>
       </div>

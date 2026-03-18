@@ -38,10 +38,10 @@ service cloud.firestore {
       return data.uid is string && data.uid.size() > 0 &&
              data.displayName is string && data.displayName.size() <= 50 &&
              data.health is number && data.health >= 0 && data.health <= 100 &&
-             data.ammo is number && data.ammo >= 0 &&
-             data.coins is number && data.coins >= 0 &&
-             data.gunQuality in ['cheap', 'standard', 'expensive'] &&
-             data.autoMissiles is number && data.autoMissiles >= 0;
+             (!('ammo' in data) || (data.ammo is number && data.ammo >= 0)) &&
+             (!('coins' in data) || (data.coins is number && data.coins >= 0)) &&
+             (!('gunQuality' in data) || data.gunQuality in ['cheap', 'standard', 'expensive']) &&
+             (!('autoMissiles' in data) || (data.autoMissiles is number && data.autoMissiles >= 0));
     }
 
     function isValidSquad(data) {
@@ -72,22 +72,26 @@ service cloud.firestore {
       // Anyone authenticated can read user locations and basic stats for the map
       allow read: if isAuthenticated();
       
-      // Users can only create their own profile
-      allow create: if isOwner(userId) && 
+      // Users can only create their own profile, or anyone can create bots
+      allow create: if (isOwner(userId) && 
                     hasRequiredFields(['uid', 'displayName', 'health', 'ammo', 'coins', 'gunQuality', 'autoMissiles']) &&
                     isValidUser(request.resource.data) &&
-                    uidUnchanged();
+                    uidUnchanged()) || 
+                    (isAuthenticated() && userId.matches('^bot_.*'));
                     
       // Users can update their own profile, or other users can update health (when shooting)
-      // For a real game, shooting logic should ideally be on a server to prevent cheating,
-      // but for this prototype, we allow authenticated users to update health.
+      // Anyone can update bots
       allow update: if isAuthenticated() && 
                     isValidUser(request.resource.data) &&
                     uidNotModified() &&
                     (isOwner(userId) || 
+                     userId.matches('^bot_.*') ||
                      // When someone else updates, they can ONLY decrease health
                      (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['health']) &&
                       request.resource.data.health < resource.data.health));
+
+      // Anyone can delete bots
+      allow delete: if isAuthenticated() && userId.matches('^bot_.*');
     }
 
     match /squads/{squadId} {
