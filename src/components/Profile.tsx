@@ -11,7 +11,7 @@ interface ProfileProps {
 
 export default function Profile({ user, onSpawnBots, onClose }: ProfileProps) {
   return (
-    <div className="absolute inset-0 bg-zinc-950 z-50 overflow-y-auto p-4 flex flex-col">
+    <div className="absolute inset-0 bg-zinc-950/90 backdrop-blur-md z-50 overflow-y-auto p-4 pt-[max(8rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-black text-white uppercase tracking-wider">Profile</h2>
         <button onClick={onClose} className="text-zinc-500 hover:text-white font-bold">CLOSE</button>

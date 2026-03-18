@@ -139,5 +139,9 @@ service cloud.firestore {
                     isValidTerritory(request.resource.data) &&
                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ownerSquadId']);
     }
+
+    match /system/{document=**} {
+      allow read, write: if isAuthenticated();
+    }
   }
 }

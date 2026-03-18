@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Circle, Rectangle, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, Rectangle, useMap, Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { User, Treasure, Territory, Squad } from '../types';
@@ -47,9 +47,11 @@ function ChangeView({ center, zoom }: { center: [number, number]; zoom: number }
   return null;
 }
 
-const getPlayerIcon = (squad?: Squad, isCurrentUser?: boolean) => {
+const getPlayerIcon = (squad?: Squad, relation: 'self' | 'ally' | 'enemy' = 'enemy') => {
   const avatar = squad?.avatarUrl || '👤';
-  const borderColor = isCurrentUser ? '#3b82f6' : '#ef4444'; // blue for me, red for enemies
+  let borderColor = '#ef4444'; // red for enemies
+  if (relation === 'self') borderColor = '#3b82f6'; // blue for me
+  if (relation === 'ally') borderColor = '#10b981'; // emerald for squad members
   
   return L.divIcon({
     className: 'bg-transparent border-none',
@@ -79,7 +81,7 @@ interface GameMapProps {
   territories: Territory[];
   onAttack: (enemy: User, useMissile?: boolean) => void;
   onCollectTreasure: (treasure: Treasure) => void;
-  onClaimTerritory: () => void;
+  onClaimTerritory: (territoryId?: string) => void;
 }
 
 export default function GameMap({ currentUser, players, squads, treasures, territories, onAttack, onCollectTreasure, onClaimTerritory }: GameMapProps) {
@@ -132,7 +134,7 @@ export default function GameMap({ currentUser, players, squads, treasures, terri
 
   return (
     <div className="w-full h-full relative z-0">
-      <MapContainer center={center} zoom={16} className="w-full h-full" zoomControl={false}>
+      <MapContainer center={center} zoom={16} className="w-full h-full z-0" zoomControl={false}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
@@ -156,7 +158,10 @@ export default function GameMap({ currentUser, players, squads, treasures, terri
         ))}
 
         {/* Current Player */}
-        <Marker position={center} icon={getPlayerIcon(mySquad, true)}>
+        <Marker position={center} icon={getPlayerIcon(mySquad, 'self')}>
+          <Tooltip direction="bottom" offset={[0, 10]} opacity={0.9} permanent className="bg-zinc-900 border-zinc-800 text-white font-bold">
+            You {mySquad && <span className="text-blue-400">[{mySquad.name}]</span>}
+          </Tooltip>
           <Popup>
             <div className="text-center">
               <p className="font-bold">{currentUser.displayName}</p>
@@ -183,35 +188,49 @@ export default function GameMap({ currentUser, players, squads, treasures, terri
             { latitude: currentUser.lat, longitude: currentUser.lng },
             { latitude: player.lat, longitude: player.lng }
           );
-          const inRange = distance <= 100;
+          const inRange = true; // Allow attacking players in different zones
           
+          const isAlly = currentUser.squadId && currentUser.squadId === player.squadId;
+          const relation = isAlly ? 'ally' : 'enemy';
+
           // Check invisibility
           const isInvisible = player.invisibleUntil && new Date(player.invisibleUntil) > new Date();
-          if (isInvisible) return null;
+          if (isInvisible && !isAlly) return null; // Allies can always see each other
 
           const playerSquad = squads.find(s => s.id === player.squadId);
 
           return (
-            <Marker key={player.uid} position={[player.lat, player.lng]} icon={getPlayerIcon(playerSquad, false)}>
+            <Marker key={player.uid} position={[player.lat, player.lng]} icon={getPlayerIcon(playerSquad, relation)}>
+              <Tooltip direction="bottom" offset={[0, 10]} opacity={0.9} permanent className={`bg-zinc-900 border-zinc-800 font-bold ${isAlly ? 'text-emerald-400' : 'text-red-400'}`}>
+                {player.displayName} {playerSquad && <span className="opacity-75">[{playerSquad.name}]</span>}
+              </Tooltip>
               <Popup>
                 <div className="text-center">
                   <p className="font-bold">{player.displayName}</p>
+                  {playerSquad && <p className="text-xs text-zinc-400 mb-1">{playerSquad.name}</p>}
                   <p className="text-sm">Health: {player.health}</p>
                   <p className="text-xs text-gray-500">{distance}m away</p>
-                  <button 
-                    onClick={() => onAttack(player)}
-                    disabled={!inRange || currentUser.ammo <= 0 || player.health <= 0}
-                    className="mt-2 px-4 py-1 bg-red-600 text-white rounded disabled:opacity-50 text-sm font-bold w-full"
-                  >
-                    {player.health <= 0 ? 'Eliminated' : !inRange ? 'Out of Range' : currentUser.ammo <= 0 ? 'No Ammo' : 'ATTACK'}
-                  </button>
-                  {currentUser.autoMissiles > 0 && player.health > 0 && (
-                    <button 
-                      onClick={() => onAttack(player, true)}
-                      className="mt-1 px-4 py-1 bg-orange-600 text-white rounded text-sm font-bold w-full flex items-center justify-center gap-1"
-                    >
-                      🚀 FIRE MISSILE
-                    </button>
+                  {!isAlly && (
+                    <>
+                      <button 
+                        onClick={() => onAttack(player)}
+                        disabled={currentUser.ammo <= 0 || player.health <= 0}
+                        className="mt-2 px-4 py-1 bg-red-600 text-white rounded disabled:opacity-50 text-sm font-bold w-full"
+                      >
+                        {player.health <= 0 ? 'Eliminated' : currentUser.ammo <= 0 ? 'No Ammo' : 'ATTACK'}
+                      </button>
+                      {currentUser.autoMissiles > 0 && player.health > 0 && (
+                        <button 
+                          onClick={() => onAttack(player, true)}
+                          className="mt-1 px-4 py-1 bg-orange-600 text-white rounded text-sm font-bold w-full flex items-center justify-center gap-1"
+                        >
+                          🚀 FIRE MISSILE
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {isAlly && (
+                    <p className="mt-2 text-xs font-bold text-emerald-500 bg-emerald-500/10 py-1 rounded">SQUAD ALLY</p>
                   )}
                 </div>
               </Popup>
@@ -310,7 +329,17 @@ export default function GameMap({ currentUser, players, squads, treasures, terri
                     <p className="font-bold text-red-500">Capture Zone</p>
                     <p className="text-sm">Owned by: {squad?.name || territory.ownerSquadId}</p>
                     {inCaptureZone && (
-                      <p className="text-xs text-emerald-500 font-bold mt-1">You are in the capture zone!</p>
+                      <>
+                        <p className="text-xs text-emerald-500 font-bold mt-1">You are in the capture zone!</p>
+                        {territory.ownerSquadId !== currentUser.squadId && (
+                          <button 
+                            onClick={() => onClaimTerritory(territory.id)}
+                            className="mt-2 px-4 py-1 bg-emerald-600 text-white rounded text-sm font-bold w-full"
+                          >
+                            CAPTURE (100 BC)
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                 </Popup>

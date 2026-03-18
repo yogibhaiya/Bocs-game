@@ -40,8 +40,8 @@ export default function App() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-4">
-        <div className="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-2xl p-8 text-center shadow-2xl">
+      <div className="min-h-[100dvh] bg-zinc-950 flex flex-col items-center justify-center p-4">
+        <div className="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-2xl p-6 sm:p-8 text-center shadow-2xl">
           <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-emerald-400 mb-2 tracking-tighter">BOCS</h1>
           <p className="text-zinc-400 mb-8 font-mono text-sm uppercase tracking-widest">Real-World Tactical Combat</p>
           
@@ -93,31 +93,38 @@ export default function App() {
 
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-zinc-950 flex items-center justify-center">
         <div className="animate-spin w-8 h-8 border-4 border-cyan-500 border-t-transparent rounded-full"></div>
       </div>
     );
   }
 
+  if (!currentUser.squadId) {
+    return (
+      <div className="flex flex-col h-[100dvh] w-full bg-zinc-950 overflow-hidden font-sans">
+        <div className="flex-1 relative min-h-0">
+          <Squad user={currentUser} squads={squads} players={players} onClose={() => {}} hideClose={true} />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-screen w-full bg-zinc-950 flex flex-col overflow-hidden relative font-sans">
+    <div className="flex flex-col h-[100dvh] w-full bg-zinc-950 overflow-hidden font-sans">
       {/* Main Content Area */}
-      <div className="flex-1 relative">
-        {activeTab === 'map' && (
-          <>
-            <HUD user={currentUser} />
-            <GameMap 
-              currentUser={currentUser} 
-              players={players} 
-              squads={squads}
-              treasures={treasures} 
-              territories={territories}
-              onAttack={attackPlayer}
-              onCollectTreasure={collectTreasure}
-              onClaimTerritory={claimTerritory}
-            />
-          </>
-        )}
+      <div className="flex-1 relative min-h-0">
+        <HUD user={currentUser} />
+        <GameMap 
+          currentUser={currentUser} 
+          players={players} 
+          squads={squads}
+          treasures={treasures} 
+          territories={territories}
+          onAttack={attackPlayer}
+          onCollectTreasure={collectTreasure}
+          onClaimTerritory={claimTerritory}
+        />
+        
         {activeTab === 'shop' && <Shop user={currentUser} onBuy={buyItem} onClose={() => setActiveTab('map')} />}
         {activeTab === 'squad' && <Squad user={currentUser} squads={squads} players={players} onClose={() => setActiveTab('map')} />}
         {activeTab === 'leaderboard' && <Leaderboard squads={squads} onClose={() => setActiveTab('map')} />}
@@ -126,54 +133,54 @@ export default function App() {
       </div>
 
       {/* Bottom Navigation */}
-      <div className="bg-zinc-950 border-t border-zinc-900 pb-safe z-20">
-        <div className="flex justify-around items-center p-2">
+      <div className="shrink-0 bg-zinc-950 border-t border-zinc-900 z-[100] pb-[max(env(safe-area-inset-bottom),0.5rem)] relative">
+        <div className="flex justify-around items-center p-1 sm:p-2">
           <button 
             onClick={() => setActiveTab('profile')}
-            className={`flex flex-col items-center p-2 rounded-xl transition-colors ${activeTab === 'profile' ? 'text-purple-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+            className={`flex flex-col items-center p-1 sm:p-2 rounded-xl transition-colors min-w-[3.5rem] ${activeTab === 'profile' ? 'text-purple-400' : 'text-zinc-500 hover:text-zinc-300'}`}
           >
-            <UserCircle className="w-6 h-6 mb-1" />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Profile</span>
+            <UserCircle className="w-5 h-5 sm:w-6 sm:h-6 mb-1" />
+            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">Profile</span>
           </button>
 
           <button 
             onClick={() => setActiveTab('map')}
-            className={`flex flex-col items-center p-2 rounded-xl transition-colors ${activeTab === 'map' ? 'text-cyan-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+            className={`flex flex-col items-center p-1 sm:p-2 rounded-xl transition-colors min-w-[3.5rem] ${activeTab === 'map' ? 'text-cyan-400' : 'text-zinc-500 hover:text-zinc-300'}`}
           >
-            <MapIcon className="w-6 h-6 mb-1" />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Map</span>
+            <MapIcon className="w-5 h-5 sm:w-6 sm:h-6 mb-1" />
+            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">Map</span>
           </button>
           
           <button 
             onClick={() => setActiveTab('squad')}
-            className={`flex flex-col items-center p-2 rounded-xl transition-colors ${activeTab === 'squad' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+            className={`flex flex-col items-center p-1 sm:p-2 rounded-xl transition-colors min-w-[3.5rem] ${activeTab === 'squad' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
           >
-            <Users className="w-6 h-6 mb-1" />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Squad</span>
+            <Users className="w-5 h-5 sm:w-6 sm:h-6 mb-1" />
+            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">Squad</span>
           </button>
 
           <button 
             onClick={() => setActiveTab('territories')}
-            className={`flex flex-col items-center p-2 rounded-xl transition-colors ${activeTab === 'territories' ? 'text-red-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+            className={`flex flex-col items-center p-1 sm:p-2 rounded-xl transition-colors min-w-[3.5rem] ${activeTab === 'territories' ? 'text-red-400' : 'text-zinc-500 hover:text-zinc-300'}`}
           >
-            <Flag className="w-6 h-6 mb-1" />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Territory</span>
+            <Flag className="w-5 h-5 sm:w-6 sm:h-6 mb-1" />
+            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">Zones</span>
           </button>
           
           <button 
             onClick={() => setActiveTab('shop')}
-            className={`flex flex-col items-center p-2 rounded-xl transition-colors ${activeTab === 'shop' ? 'text-yellow-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+            className={`flex flex-col items-center p-1 sm:p-2 rounded-xl transition-colors min-w-[3.5rem] ${activeTab === 'shop' ? 'text-yellow-400' : 'text-zinc-500 hover:text-zinc-300'}`}
           >
-            <ShoppingCart className="w-6 h-6 mb-1" />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Shop</span>
+            <ShoppingCart className="w-5 h-5 sm:w-6 sm:h-6 mb-1" />
+            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">Shop</span>
           </button>
 
           <button 
             onClick={() => setActiveTab('leaderboard')}
-            className={`flex flex-col items-center p-2 rounded-xl transition-colors ${activeTab === 'leaderboard' ? 'text-orange-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+            className={`flex flex-col items-center p-1 sm:p-2 rounded-xl transition-colors min-w-[3.5rem] ${activeTab === 'leaderboard' ? 'text-orange-400' : 'text-zinc-500 hover:text-zinc-300'}`}
           >
-            <Trophy className="w-6 h-6 mb-1" />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Rank</span>
+            <Trophy className="w-5 h-5 sm:w-6 sm:h-6 mb-1" />
+            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">Rank</span>
           </button>
         </div>
       </div>
