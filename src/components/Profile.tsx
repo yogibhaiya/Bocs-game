@@ -6,12 +6,14 @@ import { LogOut, UserCircle, Bot } from 'lucide-react';
 interface ProfileProps {
   user: User;
   onSpawnBots: () => void;
+  onSpawnTenBots: () => void;
+  onSpawnTestEntities: () => void;
   onClose: () => void;
 }
 
-export default function Profile({ user, onSpawnBots, onClose }: ProfileProps) {
+export default function Profile({ user, onSpawnBots, onSpawnTenBots, onSpawnTestEntities, onClose }: ProfileProps) {
   return (
-    <div className="absolute inset-0 bg-zinc-950/90 backdrop-blur-md z-50 overflow-y-auto p-4 pt-[max(8rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col">
+    <div className="absolute inset-0 bg-zinc-950/90 backdrop-blur-md z-[10000] overflow-y-auto p-4 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-black text-white uppercase tracking-wider">Profile</h2>
         <button onClick={onClose} className="text-zinc-500 hover:text-white font-bold">CLOSE</button>
@@ -49,11 +51,27 @@ export default function Profile({ user, onSpawnBots, onClose }: ProfileProps) {
       </div>
 
       <button 
+        onClick={onSpawnTestEntities}
+        className="mb-4 w-full py-4 bg-zinc-800 text-white border border-zinc-700 rounded-xl font-bold text-lg hover:bg-zinc-700 transition-colors flex items-center justify-center gap-3"
+      >
+        <Bot className="w-5 h-5 text-emerald-400" />
+        SPAWN TEST ENEMY & TREASURE
+      </button>
+
+      <button 
+        onClick={onSpawnTenBots}
+        className="mb-4 w-full py-4 bg-zinc-800 text-white border border-zinc-700 rounded-xl font-bold text-lg hover:bg-zinc-700 transition-colors flex items-center justify-center gap-3"
+      >
+        <Bot className="w-5 h-5 text-cyan-400" />
+        SPAWN 10 BOTS NEARBY
+      </button>
+
+      <button 
         onClick={onSpawnBots}
         className="mb-4 w-full py-4 bg-zinc-800 text-white border border-zinc-700 rounded-xl font-bold text-lg hover:bg-zinc-700 transition-colors flex items-center justify-center gap-3"
       >
         <Bot className="w-5 h-5 text-cyan-400" />
-        SPAWN TRAINING BOTS
+        SPAWN TRAINING BOTS (WORLDWIDE)
       </button>
 
       <button 

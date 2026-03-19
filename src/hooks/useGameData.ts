@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, query, where, getDocs, getDoc, serverTimestamp, increment, DocumentSnapshot } from 'firebase/firestore';
+import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, query, where, getDocs, getDoc, serverTimestamp, increment, DocumentSnapshot, runTransaction } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { User, Squad, Treasure, Territory } from '../types';
+import { User, Squad, Treasure, Territory, Attack } from '../types';
 import { useGeolocation } from './useGeolocation';
 import { getDistance } from 'geolib';
 
@@ -62,6 +62,7 @@ export const useGameData = () => {
   const [squads, setSquads] = useState<Squad[]>([]);
   const [treasures, setTreasures] = useState<Treasure[]>([]);
   const [territories, setTerritories] = useState<Territory[]>([]);
+  const [attacks, setAttacks] = useState<Attack[]>([]);
   const { location } = useGeolocation();
   const [isAuthReady, setIsAuthReady] = useState(false);
 
@@ -77,7 +78,7 @@ export const useGameData = () => {
     if (!isAuthReady) return;
     const user = auth.currentUser;
     if (!user) return;
-    const unsub = onSnapshot(doc(db, 'users', user.uid), (snapshot) => {
+    const unsub = onSnapshot(doc(db, 'users', user.uid), async (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data() as User;
         
@@ -86,9 +87,13 @@ export const useGameData = () => {
         const updates: any = {};
         
         if (data.ammo === undefined) { updates.ammo = 50; needsUpdate = true; data.ammo = 50; }
-        if (data.coins === undefined) { updates.coins = 100; needsUpdate = true; data.coins = 100; }
+        if (data.coins === undefined) { updates.coins = 10000; needsUpdate = true; data.coins = 10000; }
         if (data.gunQuality === undefined) { updates.gunQuality = 'cheap'; needsUpdate = true; data.gunQuality = 'cheap'; }
         if (data.autoMissiles === undefined) { updates.autoMissiles = 0; needsUpdate = true; data.autoMissiles = 0; }
+        if (data.squadId === undefined || data.squadId === null) { updates.squadId = 'squad_general'; needsUpdate = true; data.squadId = 'squad_general'; }
+        
+        // If user has old health (100), update to 10000
+        if (data.health === 100) { updates.health = 10000; needsUpdate = true; data.health = 10000; }
         
         if (needsUpdate) {
           updateDoc(doc(db, 'users', user.uid), updates).catch(e => console.error("Migration error:", e));
@@ -104,17 +109,31 @@ export const useGameData = () => {
           lat: location?.lat || 0,
           lng: location?.lng || 0,
           lastActive: new Date().toISOString(),
-          health: 100,
+          health: 10000,
           ammo: 50,
-          coins: 100, // Starting coins
+          coins: 10000, // Starting coins
           gunQuality: 'cheap',
           autoMissiles: 0,
+          squadId: 'squad_general' // Auto-assign to general squad
         };
-        setDoc(doc(db, 'users', user.uid), newUser).catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${user.uid}`));
+
+        // Ensure general squad exists
+        const generalSquadDoc = await getDoc(doc(db, 'squads', 'squad_general'));
+        if (!generalSquadDoc.exists()) {
+          await setDoc(doc(db, 'squads', 'squad_general'), {
+            id: 'squad_general',
+            name: 'General Squad',
+            leaderId: 'system',
+            score: 0,
+            avatarUrl: '🛡️'
+          });
+        }
+
+        setDoc(doc(db, 'users', user.uid), newUser, { merge: true }).catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${user.uid}`));
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}`));
     return () => unsub();
-  }, [isAuthReady, location]);
+  }, [isAuthReady]);
 
   // Update location
   useEffect(() => {
@@ -173,6 +192,32 @@ export const useGameData = () => {
     return () => unsub();
   }, [isAuthReady]);
 
+  // Listen to attacks
+  useEffect(() => {
+    if (!isAuthReady) return;
+    // We only want recent attacks. To avoid complex indexing, we just listen to all and filter locally, 
+    // or limit to last 20. Since it's a prototype, we'll just fetch all and filter.
+    // In a real app, we'd use a query with timestamp and limit.
+    const unsub = onSnapshot(collection(db, 'attacks'), (snapshot) => {
+      const a: Attack[] = [];
+      const now = Date.now();
+      snapshot.forEach(d => {
+        const data = d.data() as Attack;
+        // Only keep attacks from the last 5 seconds
+        if (data.timestamp && data.timestamp.toMillis) {
+          if (now - data.timestamp.toMillis() < 5000) {
+            a.push(data);
+          }
+        } else {
+          // If timestamp is pending (serverTimestamp), it's new
+          a.push(data);
+        }
+      });
+      setAttacks(a);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'attacks'));
+    return () => unsub();
+  }, [isAuthReady]);
+
   // Bot movement logic
   const playersRef = useRef(players);
   const territoriesRef = useRef(territories);
@@ -224,27 +269,78 @@ export const useGameData = () => {
 
           let actionTaken = false;
 
-          // 3. Combat Logic: Attack if enemy is close (< 50m)
-          if (nearestEnemy && minEnemyDist < 50) {
-            await updateDoc(doc(db, 'users', nearestEnemy.uid), {
-              health: increment(-5) // Bots do 5 damage per tick
-            });
-            actionTaken = true;
+          // 3. Combat Logic: Attack if enemy is close
+          if (nearestEnemy) {
+            if (minEnemyDist < 50) {
+              // Standard attack
+              await updateDoc(doc(db, 'users', nearestEnemy.uid), {
+                health: increment(-200) // Increased damage for bots
+              });
+              
+              // Create attack record for animation
+              const attackId = `atk_${Date.now()}_${bot.uid}`;
+              await setDoc(doc(db, 'attacks', attackId), {
+                id: attackId,
+                attackerId: bot.uid,
+                targetId: nearestEnemy.uid,
+                fromLat: bot.lat,
+                fromLng: bot.lng,
+                toLat: nearestEnemy.lat,
+                toLng: nearestEnemy.lng,
+                timestamp: serverTimestamp(),
+                type: 'bullet'
+              });
+              actionTaken = true;
+            } else if (minEnemyDist < 150 && Math.random() < 0.2) {
+              // GRENADE ATTACK (20% chance if in range)
+              await updateDoc(doc(db, 'users', nearestEnemy.uid), {
+                health: increment(-1000)
+              });
+              
+              const attackId = `atk_grenade_${Date.now()}_${bot.uid}`;
+              await setDoc(doc(db, 'attacks', attackId), {
+                id: attackId,
+                attackerId: bot.uid,
+                targetId: nearestEnemy.uid,
+                fromLat: bot.lat,
+                fromLng: bot.lng,
+                toLat: nearestEnemy.lat,
+                toLng: nearestEnemy.lng,
+                timestamp: serverTimestamp(),
+                type: 'grenade'
+              });
+              actionTaken = true;
+            }
           } 
+          
           // 4. Territory Logic: Capture if close (< 200m)
-          else if (nearestTerritory && minTerritoryDist < 200) {
+          if (!actionTaken && nearestTerritory && minTerritoryDist < 200) {
             await updateDoc(doc(db, 'territories', nearestTerritory.id), {
               ownerSquadId: bot.squadId
             });
             actionTaken = true;
           }
 
-          // 5. Movement Logic
+          // 5. Movement Logic (Cover, Flanking, Patrol)
           if (!actionTaken) {
             let targetLat = bot.lat;
             let targetLng = bot.lng;
 
-            if (nearestTerritory && minTerritoryDist < 3000) {
+            const isLowHealth = bot.health < 3000;
+
+            if (isLowHealth && nearestEnemy) {
+              // TAKE COVER: Move away from nearest enemy
+              const latDiff = bot.lat - nearestEnemy.lat;
+              const lngDiff = bot.lng - nearestEnemy.lng;
+              targetLat = bot.lat + latDiff;
+              targetLng = bot.lng + lngDiff;
+            } else if (nearestEnemy && minEnemyDist < 500) {
+              // FLANKING: Move to a position offset from the enemy
+              const angle = Math.atan2(bot.lat - nearestEnemy.lat, bot.lng - nearestEnemy.lng);
+              const flankAngle = angle + (Math.random() > 0.5 ? Math.PI / 4 : -Math.PI / 4); // 45 degrees offset
+              targetLat = nearestEnemy.lat + Math.sin(flankAngle) * 100 / 111320;
+              targetLng = nearestEnemy.lng + Math.cos(flankAngle) * 100 / (111320 * Math.cos(nearestEnemy.lat * Math.PI / 180));
+            } else if (nearestTerritory && minTerritoryDist < 3000) {
               targetLat = nearestTerritory.lat;
               targetLng = nearestTerritory.lng;
             } else if (nearestEnemy && minEnemyDist < 2000) {
@@ -264,8 +360,8 @@ export const useGameData = () => {
             let newLng = bot.lng;
 
             if (dist > 0) {
-              // Move approx 15m per tick
-              const step = Math.min(0.00015, dist); 
+              // Move approx 20m per tick (slightly faster bots)
+              const step = Math.min(0.0002, dist); 
               newLat += (latDiff / dist) * step;
               newLng += (lngDiff / dist) * step;
             }
@@ -382,7 +478,6 @@ export const useGameData = () => {
     }
     if (!useMissile && currentUser.ammo <= 0) return;
     if (useMissile && currentUser.autoMissiles <= 0) return;
-    if (enemy.health <= 0) return; // Cannot attack dead players
 
     try {
       const distance = getDistance(
@@ -396,63 +491,120 @@ export const useGameData = () => {
         return;
       }
 
-      // Calculate damage based on gun quality and territory
-      let damage = useMissile ? 50 : 10;
-      if (!useMissile) {
-        if (currentUser.gunQuality === 'standard') damage = 20;
-        if (currentUser.gunQuality === 'expensive') damage = 35;
+      await runTransaction(db, async (transaction) => {
+        const attackerRef = doc(db, 'users', currentUser.uid);
+        const enemyRef = doc(db, 'users', enemy.uid);
+        
+        const attackerDoc = await transaction.get(attackerRef);
+        const enemyDoc = await transaction.get(enemyRef);
 
-        // Territory advantage
-        const inOwnedTerritory = territories.some(t => 
-          t.ownerSquadId === currentUser.squadId && 
-          getDistance({ latitude: currentUser.lat, longitude: currentUser.lng }, { latitude: t.lat, longitude: t.lng }) <= 500
-        );
-        if (inOwnedTerritory) damage *= 2;
-
-        const inEnemyTerritory = territories.some(t => 
-          t.ownerSquadId === enemy.squadId && 
-          getDistance({ latitude: currentUser.lat, longitude: currentUser.lng }, { latitude: t.lat, longitude: t.lng }) <= 500
-        );
-        if (inEnemyTerritory) damage = Math.floor(damage / 2);
-      }
-
-      // Apply damage and reduce ammo/missile
-      const newHealth = Math.max(0, enemy.health - damage);
-      
-      // Decrease ammo or missile
-      if (useMissile) {
-        await updateDoc(doc(db, 'users', currentUser.uid), {
-          autoMissiles: increment(-1)
-        });
-      } else {
-        await updateDoc(doc(db, 'users', currentUser.uid), {
-          ammo: increment(-1)
-        });
-      }
-
-      // Update enemy health
-      if (newHealth === 0 && enemy.uid.startsWith('bot_')) {
-        await deleteDoc(doc(db, 'users', enemy.uid));
-      } else {
-        await updateDoc(doc(db, 'users', enemy.uid), {
-          health: newHealth
-        });
-      }
-
-      // If killed, reward coins
-      if (newHealth === 0) {
-        await updateDoc(doc(db, 'users', currentUser.uid), {
-          coins: increment(50) // Reward for kill
-        });
-        if (currentUser.squadId) {
-          await updateDoc(doc(db, 'squads', currentUser.squadId), {
-            score: increment(100)
-          });
+        if (!attackerDoc.exists() || !enemyDoc.exists()) {
+          throw new Error("Attacker or enemy does not exist");
         }
-      }
+
+        const attackerData = attackerDoc.data() as User;
+        const enemyData = enemyDoc.data() as User;
+
+        if (enemyData.health <= 0) return; // Already dead
+
+        // Calculate damage
+        let damage = useMissile ? 3000 : 500;
+        if (!useMissile) {
+          if (attackerData.gunQuality === 'standard') damage = 500;
+          if (attackerData.gunQuality === 'expensive') damage = 1000;
+          if (attackerData.gunQuality === 'elite') damage = 2000;
+
+          // Territory advantage
+          const inOwnedTerritory = territories.some(t => 
+            t.ownerSquadId === attackerData.squadId && 
+            getDistance({ latitude: attackerData.lat, longitude: attackerData.lng }, { latitude: t.lat, longitude: t.lng }) <= 500
+          );
+          if (inOwnedTerritory) damage *= 2;
+
+          const inEnemyTerritory = territories.some(t => 
+            t.ownerSquadId === enemyData.squadId && 
+            getDistance({ latitude: attackerData.lat, longitude: attackerData.lng }, { latitude: t.lat, longitude: t.lng }) <= 500
+          );
+          if (inEnemyTerritory) damage = Math.floor(damage / 2);
+        }
+
+        const newEnemyHealth = Math.max(0, enemyData.health - damage);
+        
+        // Update attacker ammo/missiles
+        if (useMissile) {
+          transaction.update(attackerRef, { autoMissiles: increment(-1) });
+        } else {
+          transaction.update(attackerRef, { ammo: increment(-1) });
+        }
+
+        // Update enemy health
+        if (newEnemyHealth === 0 && enemyData.uid.startsWith('bot_')) {
+          transaction.delete(enemyRef);
+        } else {
+          transaction.update(enemyRef, { health: newEnemyHealth });
+        }
+
+        // Rewards if killed
+        if (newEnemyHealth === 0) {
+          transaction.update(attackerRef, { coins: increment(50) });
+          if (attackerData.squadId) {
+            const squadRef = doc(db, 'squads', attackerData.squadId);
+            transaction.update(squadRef, { score: increment(100) });
+          }
+        }
+
+        // Create attack record
+        const attackId = `atk_${Date.now()}_${currentUser.uid}`;
+        const attackRef = doc(db, 'attacks', attackId);
+        transaction.set(attackRef, {
+          id: attackId,
+          attackerId: currentUser.uid,
+          targetId: enemy.uid,
+          fromLat: currentUser.lat,
+          fromLng: currentUser.lng,
+          toLat: enemy.lat,
+          toLng: enemy.lng,
+          timestamp: serverTimestamp(),
+          type: useMissile ? 'missile' : 'bullet'
+        });
+
+        // Bot retaliation logic (triggered after transaction)
+        if (enemyData.uid.startsWith('bot_') && newEnemyHealth > 0) {
+          setTimeout(async () => {
+            try {
+              const pDoc = await getDoc(attackerRef);
+              if (!pDoc.exists()) return;
+              const pData = pDoc.data() as User;
+              if (pData.health <= 0) return;
+              if (pData.shieldUntil && new Date(pData.shieldUntil) > new Date()) return;
+
+              const botDamage = 200 + Math.floor(Math.random() * 300);
+              const pNewHealth = Math.max(0, pData.health - botDamage);
+              
+              await updateDoc(attackerRef, { health: pNewHealth });
+              
+              const bAtkId = `atk_${Date.now()}_${enemy.uid}`;
+              await setDoc(doc(db, 'attacks', bAtkId), {
+                id: bAtkId,
+                attackerId: enemy.uid,
+                targetId: currentUser.uid,
+                fromLat: enemy.lat,
+                fromLng: enemy.lng,
+                toLat: currentUser.lat,
+                toLng: currentUser.lng,
+                timestamp: serverTimestamp(),
+                type: 'bullet'
+              });
+            } catch (e) {
+              console.error("Bot retaliation failed", e);
+            }
+          }, 600);
+        }
+      });
+
     } catch (error) {
       console.error("Attack failed:", error);
-      alert("Attack failed! Please check your connection or try again.");
+      alert("Attack failed! Please try again.");
       handleFirestoreError(error, OperationType.UPDATE, `users/${enemy.uid}`);
     }
   };
@@ -497,7 +649,7 @@ export const useGameData = () => {
           updates.ammo = increment(30);
           break;
         case 'health':
-          updates.health = 100;
+          updates.health = 10000;
           break;
         case 'gun_standard':
           updates.gunQuality = 'standard';
@@ -623,7 +775,7 @@ export const useGameData = () => {
             photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=${botId}`,
             lat: currentUser.lat + latOffset,
             lng: currentUser.lng + lngOffset,
-            health: 100,
+            health: 10000,
             coins: 1000,
             ammo: 999,
             autoMissiles: 0,
@@ -639,16 +791,105 @@ export const useGameData = () => {
     }
   };
 
+  const spawnTenBots = async () => {
+    if (!currentUser) return;
+    try {
+      const squadId = `bot_squad_ten_${Date.now()}`;
+      const leaderId = `bot_ten_0_${Date.now()}`;
+
+      // Create a single squad for these 10 bots
+      await setDoc(doc(db, 'squads', squadId), {
+        id: squadId,
+        name: `The Decimators`,
+        leaderId: leaderId,
+        score: 0,
+        avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=decimators`
+      });
+
+      for (let i = 0; i < 10; i++) {
+        const botId = `bot_ten_${i}_${Date.now()}`;
+        // Spawn within ~500m of user
+        const latOffset = (Math.random() - 0.5) * 0.01;
+        const lngOffset = (Math.random() - 0.5) * 0.01;
+        
+        await setDoc(doc(db, 'users', botId), {
+          uid: botId,
+          displayName: i === 0 ? `Elite Commander` : `Bot Soldier ${i}`,
+          email: `${botId}@example.com`,
+          photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=${botId}`,
+          lat: currentUser.lat + latOffset,
+          lng: currentUser.lng + lngOffset,
+          health: 10000,
+          coins: 500,
+          ammo: 100,
+          autoMissiles: 0,
+          gunQuality: i === 0 ? 'expensive' : 'standard',
+          squadId: squadId,
+          lastActive: new Date().toISOString()
+        });
+      }
+      alert("Spawned 10 bots nearby!");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'users');
+    }
+  };
+
+  const spawnTestEntities = async () => {
+    if (!currentUser || !location) return;
+    try {
+      // Spawn 1 Bot
+      const botId = `bot_test_${Date.now()}`;
+      const latOffset = (Math.random() - 0.5) * 0.005; // very close
+      const lngOffset = (Math.random() - 0.5) * 0.005;
+      
+      await setDoc(doc(db, 'users', botId), {
+        uid: botId,
+        displayName: `Test Bot ${Math.floor(Math.random() * 100)}`,
+        email: `${botId}@example.com`,
+        photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=${botId}`,
+        lat: location.lat + latOffset,
+        lng: location.lng + lngOffset,
+        health: 10000,
+        coins: 100,
+        ammo: 100,
+        autoMissiles: 0,
+        gunQuality: 'standard',
+        lastActive: new Date().toISOString()
+      });
+
+      // Spawn 1 Treasure
+      const treasureId = `treasure_test_${Date.now()}`;
+      const tLatOffset = (Math.random() - 0.5) * 0.005;
+      const tLngOffset = (Math.random() - 0.5) * 0.005;
+      
+      await setDoc(doc(db, 'treasures', treasureId), {
+        id: treasureId,
+        lat: location.lat + tLatOffset,
+        lng: location.lng + tLngOffset,
+        coins: 50,
+        active: true,
+        createdAt: new Date().toISOString()
+      });
+
+      alert("Spawned test bot and treasure nearby!");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'users/treasures');
+    }
+  };
+
   return {
     currentUser,
     players,
     squads,
     treasures,
     territories,
+    attacks,
     attackPlayer,
     collectTreasure,
     buyItem,
     claimTerritory,
-    spawnBots
+    spawnBots,
+    spawnTenBots,
+    spawnTestEntities
   };
 };

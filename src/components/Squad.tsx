@@ -72,7 +72,7 @@ export default function Squad({ user, squads, players, onClose, hideClose }: Squ
   };
 
   return (
-    <div className="absolute inset-0 bg-zinc-950/90 backdrop-blur-md z-50 flex flex-col p-6 pt-[max(8rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))] overflow-y-auto">
+    <div className="absolute inset-0 bg-zinc-950/90 backdrop-blur-md z-[10000] flex flex-col p-6 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))] overflow-y-auto">
       <div className="flex justify-between items-center mb-8">
         <h2 className="text-2xl font-black text-white flex items-center gap-3">
           <Users className="text-emerald-400" />

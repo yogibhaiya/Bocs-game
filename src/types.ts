@@ -1,4 +1,16 @@
-export type GunQuality = 'cheap' | 'standard' | 'expensive';
+export type GunQuality = 'cheap' | 'standard' | 'expensive' | 'elite';
+
+export interface Attack {
+  id: string;
+  attackerId: string;
+  targetId: string;
+  fromLat: number;
+  fromLng: number;
+  toLat: number;
+  toLng: number;
+  timestamp: any;
+  type?: 'bullet' | 'missile' | 'grenade';
+}
 
 export interface User {
   uid: string;

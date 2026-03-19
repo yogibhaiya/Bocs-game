@@ -15,12 +15,29 @@
         "ammo": { "type": "number" },
         "coins": { "type": "number" },
         "squadId": { "type": "string" },
-        "gunQuality": { "type": "string", "enum": ["cheap", "standard", "expensive"] },
+        "gunQuality": { "type": "string", "enum": ["cheap", "standard", "expensive", "elite"] },
         "shieldUntil": { "type": "string", "format": "date-time" },
         "invisibleUntil": { "type": "string", "format": "date-time" },
         "autoMissiles": { "type": "number" }
       },
       "required": ["uid", "displayName", "health", "ammo", "coins", "gunQuality", "autoMissiles"]
+    },
+    "Attack": {
+      "title": "Attack",
+      "description": "A record of a combat action.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "attackerId": { "type": "string" },
+        "targetId": { "type": "string" },
+        "fromLat": { "type": "number" },
+        "fromLng": { "type": "number" },
+        "toLat": { "type": "number" },
+        "toLng": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["bullet", "missile", "grenade"] }
+      },
+      "required": ["id", "attackerId", "targetId", "fromLat", "fromLng", "toLat", "toLng", "timestamp", "type"]
     },
     "Squad": {
       "title": "Squad",
@@ -78,6 +95,10 @@
     "/territories/{territoryId}": {
       "schema": { "$ref": "#/entities/Territory" },
       "description": "Stores territory ownership."
+    },
+    "/attacks/{attackId}": {
+      "schema": { "$ref": "#/entities/Attack" },
+      "description": "Stores real-time attack animations."
     }
   }
 }

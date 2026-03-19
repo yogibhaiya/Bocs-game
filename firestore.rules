@@ -37,10 +37,10 @@ service cloud.firestore {
     function isValidUser(data) {
       return data.uid is string && data.uid.size() > 0 &&
              data.displayName is string && data.displayName.size() <= 50 &&
-             data.health is number && data.health >= 0 && data.health <= 100 &&
+             data.health is number && data.health >= 0 && data.health <= 10000 &&
              (!('ammo' in data) || (data.ammo is number && data.ammo >= 0)) &&
              (!('coins' in data) || (data.coins is number && data.coins >= 0)) &&
-             (!('gunQuality' in data) || data.gunQuality in ['cheap', 'standard', 'expensive']) &&
+             (!('gunQuality' in data) || data.gunQuality in ['cheap', 'standard', 'expensive', 'elite']) &&
              (!('autoMissiles' in data) || (data.autoMissiles is number && data.autoMissiles >= 0));
     }
 
@@ -62,6 +62,15 @@ service cloud.firestore {
       return data.id is string && data.id.size() > 0 &&
              data.ownerSquadId is string && data.ownerSquadId.size() > 0 &&
              data.lat is number && data.lng is number;
+    }
+
+    function isValidAttack(data) {
+      return data.id is string && data.id.size() > 0 &&
+             data.attackerId is string && data.attackerId.size() > 0 &&
+             data.targetId is string && data.targetId.size() > 0 &&
+             data.fromLat is number && data.fromLng is number &&
+             data.toLat is number && data.toLng is number &&
+             data.type in ['bullet', 'missile', 'grenade'];
     }
 
     // ===============================================================
@@ -101,7 +110,7 @@ service cloud.firestore {
       allow create: if isAuthenticated() && 
                     hasRequiredFields(['id', 'name', 'leaderId', 'score']) &&
                     isValidSquad(request.resource.data) &&
-                    request.resource.data.leaderId == request.auth.uid;
+                    (request.resource.data.leaderId == request.auth.uid || request.resource.data.leaderId.matches('^bot_.*'));
                     
       // Only the leader can update the squad (e.g., changing name/avatar)
       // Or anyone can update the score (prototype simplification)
@@ -138,6 +147,13 @@ service cloud.firestore {
       allow update: if isAuthenticated() && 
                     isValidTerritory(request.resource.data) &&
                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ownerSquadId']);
+    }
+
+    match /attacks/{attackId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                    hasRequiredFields(['id', 'attackerId', 'targetId', 'fromLat', 'fromLng', 'toLat', 'toLng', 'timestamp', 'type']) &&
+                    isValidAttack(request.resource.data);
     }
 
     match /system/{document=**} {
