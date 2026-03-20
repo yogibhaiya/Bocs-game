@@ -27,6 +27,9 @@ export interface User {
   shieldUntil?: string;
   invisibleUntil?: string;
   autoMissiles: number;
+  grenades: number;
+  territoryCount: number;
+  onlineStatus: boolean;
 }
 
 export interface Squad {
@@ -35,6 +38,8 @@ export interface Squad {
   leaderId: string;
   score: number;
   avatarUrl: string;
+  territoryCount: number;
+  isWeeklyWinner?: boolean;
 }
 
 export interface Treasure {
@@ -48,7 +53,9 @@ export interface Treasure {
 
 export interface Territory {
   id: string;
+  ownerId: string;
   ownerSquadId: string;
   lat: number;
   lng: number;
+  createdAt: string;
 }

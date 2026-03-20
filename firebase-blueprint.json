@@ -18,9 +18,11 @@
         "gunQuality": { "type": "string", "enum": ["cheap", "standard", "expensive", "elite"] },
         "shieldUntil": { "type": "string", "format": "date-time" },
         "invisibleUntil": { "type": "string", "format": "date-time" },
-        "autoMissiles": { "type": "number" }
+        "autoMissiles": { "type": "number" },
+        "grenades": { "type": "number" },
+        "territoryCount": { "type": "number" }
       },
-      "required": ["uid", "displayName", "health", "ammo", "coins", "gunQuality", "autoMissiles"]
+      "required": ["uid", "displayName", "health", "ammo", "coins", "gunQuality", "autoMissiles", "grenades", "territoryCount"]
     },
     "Attack": {
       "title": "Attack",
@@ -48,9 +50,11 @@
         "name": { "type": "string" },
         "leaderId": { "type": "string" },
         "score": { "type": "number" },
-        "avatarUrl": { "type": "string" }
+        "avatarUrl": { "type": "string" },
+        "territoryCount": { "type": "number" },
+        "isWeeklyWinner": { "type": "boolean" }
       },
-      "required": ["id", "name", "leaderId", "score"]
+      "required": ["id", "name", "leaderId", "score", "territoryCount"]
     },
     "Treasure": {
       "title": "Treasure",
@@ -72,11 +76,13 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
+        "ownerId": { "type": "string" },
         "ownerSquadId": { "type": "string" },
         "lat": { "type": "number" },
-        "lng": { "type": "number" }
+        "lng": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "ownerSquadId", "lat", "lng"]
+      "required": ["id", "ownerId", "ownerSquadId", "lat", "lng", "createdAt"]
     }
   },
   "firestore": {

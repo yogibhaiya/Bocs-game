@@ -1,10 +1,10 @@
 import React from 'react';
 import { User } from '../types';
-import { ShoppingCart, Heart, Crosshair, Shield, EyeOff, Rocket, Zap } from 'lucide-react';
+import { ShoppingCart, Heart, Crosshair, Shield, EyeOff, Rocket, Zap, Bomb } from 'lucide-react';
 
 interface ShopProps {
   user: User;
-  onBuy: (type: 'ammo' | 'health' | 'gun_standard' | 'gun_expensive' | 'shield' | 'invisibility' | 'missile', cost: number) => void;
+  onBuy: (type: 'ammo' | 'health' | 'gun_standard' | 'gun_expensive' | 'shield' | 'invisibility' | 'missile' | 'grenade', cost: number) => void;
   onClose: () => void;
 }
 
@@ -17,6 +17,7 @@ export default function Shop({ user, onBuy, onClose }: ShopProps) {
     { id: 'shield', name: 'Energy Shield', cost: 50, icon: Shield, type: 'shield', desc: 'Invincible for 4 mins' },
     { id: 'invisibility', name: 'Stealth Cloak', cost: 150, icon: EyeOff, type: 'invisibility', desc: 'Invisible on map for 30 mins' },
     { id: 'missile', name: 'Auto Missile', cost: 200, icon: Rocket, type: 'missile', desc: 'Tracks enemy automatically' },
+    { id: 'grenade', name: 'Grenade', cost: 100, icon: Bomb, type: 'grenade', desc: 'Splash damage (100m radius)' },
   ];
 
   return (

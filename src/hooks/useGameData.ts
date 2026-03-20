@@ -89,7 +89,10 @@ export const useGameData = () => {
         if (data.ammo === undefined) { updates.ammo = 50; needsUpdate = true; data.ammo = 50; }
         if (data.coins === undefined) { updates.coins = 10000; needsUpdate = true; data.coins = 10000; }
         if (data.gunQuality === undefined) { updates.gunQuality = 'cheap'; needsUpdate = true; data.gunQuality = 'cheap'; }
-        if (data.autoMissiles === undefined) { updates.autoMissiles = 0; needsUpdate = true; data.autoMissiles = 0; }
+        if (data.autoMissiles === undefined) { updates.autoMissiles = 5; needsUpdate = true; data.autoMissiles = 5; }
+        if (data.grenades === undefined) { updates.grenades = 5; needsUpdate = true; data.grenades = 5; }
+        if (data.territoryCount === undefined) { updates.territoryCount = 0; needsUpdate = true; data.territoryCount = 0; }
+        if (data.onlineStatus === undefined) { updates.onlineStatus = true; needsUpdate = true; data.onlineStatus = true; }
         if (data.squadId === undefined || data.squadId === null) { updates.squadId = 'squad_general'; needsUpdate = true; data.squadId = 'squad_general'; }
         
         // If user has old health (100), update to 10000
@@ -113,7 +116,10 @@ export const useGameData = () => {
           ammo: 50,
           coins: 10000, // Starting coins
           gunQuality: 'cheap',
-          autoMissiles: 0,
+          autoMissiles: 5, // Starting missiles
+          grenades: 5, // Starting grenades
+          territoryCount: 0,
+          onlineStatus: true,
           squadId: 'squad_general' // Auto-assign to general squad
         };
 
@@ -125,6 +131,7 @@ export const useGameData = () => {
             name: 'General Squad',
             leaderId: 'system',
             score: 0,
+            territoryCount: 0,
             avatarUrl: '🛡️'
           });
         }
@@ -135,17 +142,79 @@ export const useGameData = () => {
     return () => unsub();
   }, [isAuthReady]);
 
-  // Update location
+  // Update location and online status (Throttled)
+  const lastPos = useRef<{ lat: number, lng: number, time: number } | null>(null);
+
   useEffect(() => {
     if (!isAuthReady) return;
     const user = auth.currentUser;
-    if (!user || !location) return;
+    if (!user) return;
+
+    // Set online on mount
     updateDoc(doc(db, 'users', user.uid), {
-      lat: location.lat,
-      lng: location.lng,
-      lastActive: new Date().toISOString(),
-    }).catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`));
-  }, [location, isAuthReady]);
+      onlineStatus: true,
+      lastActive: new Date().toISOString()
+    }).catch(e => console.error("Error setting online status:", e));
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        updateDoc(doc(db, 'users', user.uid), {
+          onlineStatus: false,
+          lastActive: new Date().toISOString()
+        }).catch(e => console.error("Error setting offline status:", e));
+      } else {
+        updateDoc(doc(db, 'users', user.uid), {
+          onlineStatus: true,
+          lastActive: new Date().toISOString()
+        }).catch(e => console.error("Error setting online status:", e));
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', () => {
+      updateDoc(doc(db, 'users', user.uid), {
+        onlineStatus: false,
+        lastActive: new Date().toISOString()
+      }).catch(e => console.error("Error setting offline status:", e));
+    });
+
+    const intervalId = setInterval(() => {
+      if (!location) return;
+
+      // Anti-cheat: Check for unrealistic jumps
+      if (lastPos.current) {
+        const dist = getDistance(
+          { latitude: lastPos.current.lat, longitude: lastPos.current.lng },
+          { latitude: location.lat, longitude: location.lng }
+        );
+        const timeDiff = (Date.now() - lastPos.current.time) / 1000;
+        const speed = dist / timeDiff; // meters per second
+
+        if (speed > 100) { // More than 100m/s (360km/h) is suspicious for a walking/running game
+          console.warn("Suspicious movement detected:", speed, "m/s");
+          // In a real app, we might flag the user or ignore the update
+        }
+      }
+
+      updateDoc(doc(db, 'users', user.uid), {
+        lat: location.lat,
+        lng: location.lng,
+        lastActive: new Date().toISOString(),
+        onlineStatus: true
+      }).catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`));
+
+      lastPos.current = { lat: location.lat, lng: location.lng, time: Date.now() };
+    }, 4000); // Update every 4 seconds
+
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      updateDoc(doc(db, 'users', user.uid), {
+        onlineStatus: false,
+        lastActive: new Date().toISOString()
+      }).catch(e => console.error("Error setting offline status:", e));
+    };
+  }, [location?.lat, location?.lng, isAuthReady]);
 
   // Listen to all players (for prototype, we fetch all. In prod, use geohashes)
   useEffect(() => {
@@ -237,6 +306,15 @@ export const useGameData = () => {
       const currentPlayers = playersRef.current;
       const currentTerritories = territoriesRef.current;
       
+      // Only the "leader" (player with smallest UID) moves the bots to avoid conflicts
+      const activePlayers = currentPlayers.filter(p => {
+        const lastActive = new Date(p.lastActive).getTime();
+        return Date.now() - lastActive < 10000; // Only consider players active in last 10s
+      });
+      const leader = activePlayers.sort((a, b) => a.uid.localeCompare(b.uid))[0];
+      
+      if (!leader || leader.uid !== currentUser.uid) return;
+
       const bots = currentPlayers.filter(p => p.uid.startsWith('bot_') && p.health > 0);
       
       bots.forEach(async (bot) => {
@@ -272,42 +350,58 @@ export const useGameData = () => {
           // 3. Combat Logic: Attack if enemy is close
           if (nearestEnemy) {
             if (minEnemyDist < 50) {
-              // Standard attack
-              await updateDoc(doc(db, 'users', nearestEnemy.uid), {
-                health: increment(-200) // Increased damage for bots
-              });
-              
-              // Create attack record for animation
-              const attackId = `atk_${Date.now()}_${bot.uid}`;
-              await setDoc(doc(db, 'attacks', attackId), {
-                id: attackId,
-                attackerId: bot.uid,
-                targetId: nearestEnemy.uid,
-                fromLat: bot.lat,
-                fromLng: bot.lng,
-                toLat: nearestEnemy.lat,
-                toLng: nearestEnemy.lng,
-                timestamp: serverTimestamp(),
-                type: 'bullet'
+              // Standard attack using transaction
+              await runTransaction(db, async (transaction) => {
+                const enemyRef = doc(db, 'users', nearestEnemy!.uid);
+                const enemyDoc = await transaction.get(enemyRef);
+                if (!enemyDoc.exists()) return;
+                const enemyData = enemyDoc.data() as User;
+                if (enemyData.health <= 0) return;
+
+                const newHealth = Math.max(0, enemyData.health - 200);
+                transaction.update(enemyRef, { health: newHealth });
+
+                // Create attack record for animation
+                const attackId = `atk_${Date.now()}_${bot.uid}`;
+                const attackRef = doc(db, 'attacks', attackId);
+                transaction.set(attackRef, {
+                  id: attackId,
+                  attackerId: bot.uid,
+                  targetId: nearestEnemy!.uid,
+                  fromLat: bot.lat,
+                  fromLng: bot.lng,
+                  toLat: nearestEnemy!.lat,
+                  toLng: nearestEnemy!.lng,
+                  timestamp: serverTimestamp(),
+                  type: 'bullet'
+                });
               });
               actionTaken = true;
             } else if (minEnemyDist < 150 && Math.random() < 0.2) {
-              // GRENADE ATTACK (20% chance if in range)
-              await updateDoc(doc(db, 'users', nearestEnemy.uid), {
-                health: increment(-1000)
-              });
-              
-              const attackId = `atk_grenade_${Date.now()}_${bot.uid}`;
-              await setDoc(doc(db, 'attacks', attackId), {
-                id: attackId,
-                attackerId: bot.uid,
-                targetId: nearestEnemy.uid,
-                fromLat: bot.lat,
-                fromLng: bot.lng,
-                toLat: nearestEnemy.lat,
-                toLng: nearestEnemy.lng,
-                timestamp: serverTimestamp(),
-                type: 'grenade'
+              // GRENADE ATTACK (20% chance if in range) using transaction
+              await runTransaction(db, async (transaction) => {
+                const enemyRef = doc(db, 'users', nearestEnemy!.uid);
+                const enemyDoc = await transaction.get(enemyRef);
+                if (!enemyDoc.exists()) return;
+                const enemyData = enemyDoc.data() as User;
+                if (enemyData.health <= 0) return;
+
+                const newHealth = Math.max(0, enemyData.health - 1000);
+                transaction.update(enemyRef, { health: newHealth });
+
+                const attackId = `atk_grenade_${Date.now()}_${bot.uid}`;
+                const attackRef = doc(db, 'attacks', attackId);
+                transaction.set(attackRef, {
+                  id: attackId,
+                  attackerId: bot.uid,
+                  targetId: nearestEnemy!.uid,
+                  fromLat: bot.lat,
+                  fromLng: bot.lng,
+                  toLat: nearestEnemy!.lat,
+                  toLng: nearestEnemy!.lng,
+                  timestamp: serverTimestamp(),
+                  type: 'grenade'
+                });
               });
               actionTaken = true;
             }
@@ -315,8 +409,15 @@ export const useGameData = () => {
           
           // 4. Territory Logic: Capture if close (< 200m)
           if (!actionTaken && nearestTerritory && minTerritoryDist < 200) {
-            await updateDoc(doc(db, 'territories', nearestTerritory.id), {
-              ownerSquadId: bot.squadId
+            await runTransaction(db, async (transaction) => {
+              const territoryRef = doc(db, 'territories', nearestTerritory!.id);
+              const territoryDoc = await transaction.get(territoryRef);
+              if (!territoryDoc.exists()) return;
+              if (territoryDoc.data().ownerSquadId === bot.squadId) return;
+
+              transaction.update(territoryRef, {
+                ownerSquadId: bot.squadId
+              });
             });
             actionTaken = true;
           }
@@ -366,17 +467,20 @@ export const useGameData = () => {
               newLng += (lngDiff / dist) * step;
             }
 
-            await updateDoc(doc(db, 'users', bot.uid), {
-              lat: newLat,
-              lng: newLng,
-              lastActive: new Date().toISOString()
-            });
+            // Only update if moved significantly to reduce Firestore writes
+            if (Math.abs(newLat - bot.lat) > 0.00001 || Math.abs(newLng - bot.lng) > 0.00001) {
+              await updateDoc(doc(db, 'users', bot.uid), {
+                lat: newLat,
+                lng: newLng
+                // Removed lastActive update for bots to reduce conflicts
+              });
+            }
           }
         } catch (error) {
           // Ignore errors for bot movement to avoid spamming console if deleted
         }
       });
-    }, 3000); // Move every 3 seconds
+    }, 5000); // Move every 5 seconds instead of 3
 
     return () => clearInterval(interval);
   }, [currentUser?.uid]);
@@ -388,32 +492,34 @@ export const useGameData = () => {
     const checkAndSpawnTreasures = async () => {
       try {
         const spawnerRef = doc(db, 'system', 'spawner');
-        const spawnerDoc = await getDoc(spawnerRef);
-        
         const now = Date.now();
         const oneHour = 60 * 60 * 1000;
         
         let shouldSpawn = false;
-        
-        if (!spawnerDoc.exists()) {
-          shouldSpawn = true;
-        } else {
-          const data = spawnerDoc.data();
-          if (!data.lastTreasureSpawn || now - data.lastTreasureSpawn > oneHour) {
-            shouldSpawn = true;
-          }
-        }
 
-        // Also check if map is empty (less than 50 treasures)
-        const treasuresSnapshot = await getDocs(query(collection(db, 'treasures'), where('active', '==', true)));
-        if (treasuresSnapshot.size < 50) {
-          shouldSpawn = true;
-        }
+        await runTransaction(db, async (transaction) => {
+          const spawnerDoc = await transaction.get(spawnerRef);
+          
+          if (!spawnerDoc.exists()) {
+            shouldSpawn = true;
+          } else {
+            const data = spawnerDoc.data();
+            if (!data.lastTreasureSpawn || now - data.lastTreasureSpawn > oneHour) {
+              shouldSpawn = true;
+            }
+          }
+
+          // Also check if map is empty (less than 50 treasures)
+          // Note: We can't easily check collection size inside a transaction without fetching all docs,
+          // so we'll rely on the timestamp check mostly, but we can do a quick check outside if needed.
+          // For now, let's just use the timestamp to prevent double-spawning.
+          
+          if (shouldSpawn) {
+            transaction.set(spawnerRef, { lastTreasureSpawn: now }, { merge: true });
+          }
+        });
 
         if (shouldSpawn) {
-          // Update the spawner doc immediately to prevent other clients from spawning
-          await setDoc(spawnerRef, { lastTreasureSpawn: now }, { merge: true });
-          
           // Spawn 50 new treasures all over the map
           for (let i = 0; i < 50; i++) {
             const newId = `treasure_${now}_${i}`;
@@ -470,143 +576,408 @@ export const useGameData = () => {
     };
   }, [currentUser?.uid, currentUser?.lat, currentUser?.lng]);
 
-  const attackPlayer = async (enemy: User, useMissile: boolean = false) => {
+  // Weekly Competition Logic
+  useEffect(() => {
+    if (!currentUser || !isAuthReady) return;
+
+    const checkWeeklyReset = async () => {
+      try {
+        const competitionRef = doc(db, 'system', 'competition');
+        const now = new Date();
+        const startOfWeek = new Date(now.getTime());
+        startOfWeek.setUTCHours(0, 0, 0, 0);
+        startOfWeek.setUTCDate(now.getUTCDate() - now.getUTCDay()); // Sunday as start of week
+
+        await runTransaction(db, async (transaction) => {
+          const compDoc = await transaction.get(competitionRef);
+          let lastReset = null;
+          
+          if (compDoc.exists()) {
+            lastReset = compDoc.data().lastReset;
+          }
+
+          if (!lastReset || new Date(lastReset) < startOfWeek) {
+            // Only the leader performs the reset
+            const activePlayers = players.filter(p => {
+              const lastActive = new Date(p.lastActive).getTime();
+              return Date.now() - lastActive < 60000;
+            });
+            const leader = activePlayers.sort((a, b) => a.uid.localeCompare(b.uid))[0];
+            if (leader && leader.uid === currentUser.uid) {
+              console.log("Weekly reset triggered by leader:", currentUser.displayName);
+              
+              // 1. Determine winner
+              const sortedSquads = [...squads].sort((a, b) => (b.territoryCount || 0) - (a.territoryCount || 0));
+              const winner = sortedSquads[0];
+
+              // 2. Update squads
+              for (const s of squads) {
+                const sRef = doc(db, 'squads', s.id);
+                transaction.update(sRef, {
+                  territoryCount: 0,
+                  isWeeklyWinner: winner && s.id === winner.id
+                });
+              }
+
+              // 3. Update users
+              for (const p of players) {
+                const pRef = doc(db, 'users', p.uid);
+                transaction.update(pRef, { territoryCount: 0 });
+              }
+
+              // 4. Delete all territories
+              const territoryDocs = await getDocs(collection(db, 'territories'));
+              territoryDocs.forEach(d => {
+                transaction.delete(doc(db, 'territories', d.id));
+              });
+
+              // 5. Update reset timestamp
+              transaction.set(competitionRef, { lastReset: now.toISOString() }, { merge: true });
+            }
+          }
+        });
+      } catch (error) {
+        console.error("Weekly reset check failed:", error);
+      }
+    };
+
+    const interval = setInterval(checkWeeklyReset, 60000); // Check every minute
+    checkWeeklyReset();
+    return () => clearInterval(interval);
+  }, [currentUser?.uid, isAuthReady, players.length, squads.length]);
+
+  const throwGrenade = async (targetLat: number, targetLng: number) => {
     if (!currentUser) return;
     if (currentUser.health <= 0) {
-      alert("You are eliminated! Buy a health pack from the shop to respawn.");
+      alert("You are eliminated!");
       return;
     }
-    if (!useMissile && currentUser.ammo <= 0) return;
-    if (useMissile && currentUser.autoMissiles <= 0) return;
+    if (currentUser.grenades <= 0) {
+      alert("Out of grenades!");
+      return;
+    }
 
     try {
-      const distance = getDistance(
-        { latitude: currentUser.lat, longitude: currentUser.lng },
-        { latitude: enemy.lat, longitude: enemy.lng }
-      );
-
-      // Check if enemy has shield
-      if (enemy.shieldUntil && new Date(enemy.shieldUntil) > new Date()) {
-        alert("Enemy is shielded!");
-        return;
-      }
-
       await runTransaction(db, async (transaction) => {
         const attackerRef = doc(db, 'users', currentUser.uid);
-        const enemyRef = doc(db, 'users', enemy.uid);
-        
         const attackerDoc = await transaction.get(attackerRef);
-        const enemyDoc = await transaction.get(enemyRef);
-
-        if (!attackerDoc.exists() || !enemyDoc.exists()) {
-          throw new Error("Attacker or enemy does not exist");
-        }
-
+        if (!attackerDoc.exists()) throw new Error("Attacker not found");
         const attackerData = attackerDoc.data() as User;
-        const enemyData = enemyDoc.data() as User;
 
-        if (enemyData.health <= 0) return; // Already dead
+        if (attackerData.grenades <= 0) throw new Error("Out of grenades");
 
-        // Calculate damage
-        let damage = useMissile ? 3000 : 500;
-        if (!useMissile) {
-          if (attackerData.gunQuality === 'standard') damage = 500;
-          if (attackerData.gunQuality === 'expensive') damage = 1000;
-          if (attackerData.gunQuality === 'elite') damage = 2000;
+        // 1. Find all enemies within 100m of target
+        const radius = 100; // 100 meters
+        const splashDamage = 2000;
 
-          // Territory advantage
-          const inOwnedTerritory = territories.some(t => 
-            t.ownerSquadId === attackerData.squadId && 
-            getDistance({ latitude: attackerData.lat, longitude: attackerData.lng }, { latitude: t.lat, longitude: t.lng }) <= 500
-          );
-          if (inOwnedTerritory) damage *= 2;
+        const enemies = players.filter(p => 
+          p.uid !== currentUser.uid && 
+          p.squadId !== currentUser.squadId && 
+          p.health > 0 &&
+          p.onlineStatus === true && // ONLY damage online players
+          getDistance({ latitude: targetLat, longitude: targetLng }, { latitude: p.lat, longitude: p.lng }) <= radius
+        );
 
-          const inEnemyTerritory = territories.some(t => 
-            t.ownerSquadId === enemyData.squadId && 
-            getDistance({ latitude: attackerData.lat, longitude: attackerData.lng }, { latitude: t.lat, longitude: t.lng }) <= 500
-          );
-          if (inEnemyTerritory) damage = Math.floor(damage / 2);
-        }
+        // 2. Fetch all enemy docs BEFORE any writes
+        const enemyDocs = await Promise.all(enemies.map(enemy => transaction.get(doc(db, 'users', enemy.uid))));
 
-        const newEnemyHealth = Math.max(0, enemyData.health - damage);
-        
-        // Update attacker ammo/missiles
-        if (useMissile) {
-          transaction.update(attackerRef, { autoMissiles: increment(-1) });
-        } else {
-          transaction.update(attackerRef, { ammo: increment(-1) });
-        }
+        // 3. Deduct grenade
+        transaction.update(attackerRef, { grenades: increment(-1) });
 
-        // Update enemy health
-        if (newEnemyHealth === 0 && enemyData.uid.startsWith('bot_')) {
-          transaction.delete(enemyRef);
-        } else {
-          transaction.update(enemyRef, { health: newEnemyHealth });
-        }
-
-        // Rewards if killed
-        if (newEnemyHealth === 0) {
-          transaction.update(attackerRef, { coins: increment(50) });
-          if (attackerData.squadId) {
-            const squadRef = doc(db, 'squads', attackerData.squadId);
-            transaction.update(squadRef, { score: increment(100) });
-          }
-        }
-
-        // Create attack record
-        const attackId = `atk_${Date.now()}_${currentUser.uid}`;
+        // 4. Create attack record for explosion animation
+        const attackId = `grenade_${Date.now()}_${currentUser.uid}`;
         const attackRef = doc(db, 'attacks', attackId);
         transaction.set(attackRef, {
           id: attackId,
           attackerId: currentUser.uid,
-          targetId: enemy.uid,
+          targetId: 'splash_damage', // Special ID for splash
           fromLat: currentUser.lat,
           fromLng: currentUser.lng,
-          toLat: enemy.lat,
-          toLng: enemy.lng,
+          toLat: targetLat,
+          toLng: targetLng,
           timestamp: serverTimestamp(),
-          type: useMissile ? 'missile' : 'bullet'
+          type: 'grenade'
         });
 
-        // Bot retaliation logic (triggered after transaction)
-        if (enemyData.uid.startsWith('bot_') && newEnemyHealth > 0) {
-          setTimeout(async () => {
-            try {
-              const pDoc = await getDoc(attackerRef);
-              if (!pDoc.exists()) return;
-              const pData = pDoc.data() as User;
-              if (pData.health <= 0) return;
-              if (pData.shieldUntil && new Date(pData.shieldUntil) > new Date()) return;
+        // 5. Update enemy health and handle kills
+        for (const enemyDoc of enemyDocs) {
+          if (enemyDoc.exists()) {
+            const enemyData = enemyDoc.data() as User;
+            const enemyRef = doc(db, 'users', enemyData.uid);
+            const newHealth = Math.max(0, enemyData.health - splashDamage);
+            
+            if (newHealth === 0) {
+              // Handle Kill
+              transaction.update(attackerRef, { coins: increment(500) }); // More coins for kill
+              if (attackerData.squadId) {
+                const squadRef = doc(db, 'squads', attackerData.squadId);
+                transaction.update(squadRef, { score: increment(1000) });
+              }
 
-              const botDamage = 200 + Math.floor(Math.random() * 300);
-              const pNewHealth = Math.max(0, pData.health - botDamage);
-              
-              await updateDoc(attackerRef, { health: pNewHealth });
-              
-              const bAtkId = `atk_${Date.now()}_${enemy.uid}`;
-              await setDoc(doc(db, 'attacks', bAtkId), {
-                id: bAtkId,
-                attackerId: enemy.uid,
-                targetId: currentUser.uid,
-                fromLat: enemy.lat,
-                fromLng: enemy.lng,
-                toLat: currentUser.lat,
-                toLng: currentUser.lng,
-                timestamp: serverTimestamp(),
-                type: 'bullet'
-              });
-            } catch (e) {
-              console.error("Bot retaliation failed", e);
+              // Transfer Territories
+              const victimTerritories = territories.filter(t => t.ownerId === enemyData.uid);
+              for (const t of victimTerritories) {
+                const tRef = doc(db, 'territories', t.id);
+                transaction.update(tRef, {
+                  ownerId: currentUser.uid,
+                  ownerSquadId: currentUser.squadId || 'squad_general'
+                });
+              }
+
+              if (victimTerritories.length > 0) {
+                transaction.update(attackerRef, { territoryCount: increment(victimTerritories.length) });
+                transaction.update(enemyRef, { territoryCount: 0 });
+                
+                if (attackerData.squadId) {
+                  const aSquadRef = doc(db, 'squads', attackerData.squadId);
+                  transaction.update(aSquadRef, { territoryCount: increment(victimTerritories.length) });
+                }
+                if (enemyData.squadId) {
+                  const vSquadRef = doc(db, 'squads', enemyData.squadId);
+                  transaction.update(vSquadRef, { territoryCount: increment(-victimTerritories.length) });
+                }
+              }
+
+              if (enemyData.uid.startsWith('bot_')) {
+                transaction.delete(enemyRef);
+              } else {
+                transaction.update(enemyRef, { health: 0 });
+              }
+            } else {
+              transaction.update(enemyRef, { health: newHealth });
             }
-          }, 600);
+          }
         }
       });
-
-    } catch (error) {
-      console.error("Attack failed:", error);
-      alert("Attack failed! Please try again.");
-      handleFirestoreError(error, OperationType.UPDATE, `users/${enemy.uid}`);
+    } catch (error: any) {
+      console.error("Grenade failed:", error);
+      handleFirestoreError(error, OperationType.UPDATE, `users/${currentUser.uid}`);
     }
+  };
+
+  const fireWeapon = async (targetLatLng: { latitude: number, longitude: number } | null, useMissile: boolean = false) => {
+    if (!currentUser) return;
+
+    const executeFire = async (retries = 5) => {
+      if (currentUser.health <= 0) {
+        alert("You are eliminated! Buy a health pack from the shop to respawn.");
+        return;
+      }
+      if (!useMissile && currentUser.ammo <= 0) {
+        alert("Out of ammo!");
+        return;
+      }
+      if (useMissile && currentUser.autoMissiles <= 0) {
+        alert("Out of missiles!");
+        return;
+      }
+
+      try {
+        await runTransaction(db, async (transaction) => {
+          const attackerRef = doc(db, 'users', currentUser.uid);
+          const attackerDoc = await transaction.get(attackerRef);
+          if (!attackerDoc.exists()) throw new Error("Attacker does not exist");
+          const attackerData = attackerDoc.data() as User;
+
+          // Find target
+          let target: User | null = null;
+          const enemies = players.filter(p => 
+            p.uid !== currentUser.uid && 
+            p.squadId !== currentUser.squadId && 
+            p.health > 0 &&
+            p.onlineStatus === true // ONLY attack online players
+          );
+
+          if (useMissile) {
+            // Auto-target nearest enemy within 1000m
+            let minPlayerDist = Infinity;
+            for (const enemy of enemies) {
+              const distToPlayer = getDistance({ latitude: currentUser.lat, longitude: currentUser.lng }, { latitude: enemy.lat, longitude: enemy.lng });
+              if (distToPlayer < 1000 && distToPlayer < minPlayerDist) {
+                // Check shield
+                if (!(enemy.shieldUntil && new Date(enemy.shieldUntil) > new Date())) {
+                  minPlayerDist = distToPlayer;
+                  target = enemy;
+                }
+              }
+            }
+            if (!target) {
+              alert("No target found for missile! Target must be within 1000m.");
+              return;
+            }
+          } else if (targetLatLng) {
+            // Manual aim within 100m
+            let minCrosshairDist = Infinity;
+            for (const enemy of enemies) {
+              const distToCrosshair = getDistance(targetLatLng, { latitude: enemy.lat, longitude: enemy.lng });
+              const distToPlayer = getDistance({ latitude: currentUser.lat, longitude: currentUser.lng }, { latitude: enemy.lat, longitude: enemy.lng });
+              if (distToCrosshair < 50 && distToPlayer < 100) {
+                if (distToCrosshair < minCrosshairDist) {
+                  // Check shield
+                  if (!(enemy.shieldUntil && new Date(enemy.shieldUntil) > new Date())) {
+                    minCrosshairDist = distToCrosshair;
+                    target = enemy;
+                  }
+                }
+              }
+            }
+          }
+
+          // Decrease ammo/missiles ALWAYS if we fire
+          if (useMissile) {
+            if (attackerData.autoMissiles <= 0) throw new Error("Out of missiles");
+            transaction.update(attackerRef, { autoMissiles: increment(-1) });
+          } else {
+            if (attackerData.ammo <= 0) throw new Error("Out of ammo");
+            transaction.update(attackerRef, { ammo: increment(-1) });
+          }
+
+          let finalToLat = targetLatLng?.latitude || currentUser.lat;
+          let finalToLng = targetLatLng?.longitude || currentUser.lng;
+          let targetId = 'miss';
+
+          if (target) {
+            const enemyRef = doc(db, 'users', target.uid);
+            const enemyDoc = await transaction.get(enemyRef);
+            if (enemyDoc.exists()) {
+              const enemyData = enemyDoc.data() as User;
+              if (enemyData.health > 0) {
+                let damage = useMissile ? 3000 : 500;
+                if (!useMissile) {
+                  if (attackerData.gunQuality === 'standard') damage = 500;
+                  if (attackerData.gunQuality === 'expensive') damage = 1000;
+                  if (attackerData.gunQuality === 'elite') damage = 2000;
+                  
+                  // Territory advantage
+                  const inOwnedTerritory = territories.some(t => 
+                    t.ownerSquadId === attackerData.squadId && 
+                    getDistance({ latitude: attackerData.lat, longitude: attackerData.lng }, { latitude: t.lat, longitude: t.lng }) <= 500
+                  );
+                  if (inOwnedTerritory) damage *= 2;
+
+                  const inEnemyTerritory = territories.some(t => 
+                    t.ownerSquadId === enemyData.squadId && 
+                    getDistance({ latitude: attackerData.lat, longitude: attackerData.lng }, { latitude: t.lat, longitude: t.lng }) <= 500
+                  );
+                  if (inEnemyTerritory) damage = Math.floor(damage / 2);
+                }
+                
+                const newEnemyHealth = Math.max(0, enemyData.health - damage);
+                
+                if (newEnemyHealth === 0) {
+                  // Handle Kill
+                  transaction.update(attackerRef, { 
+                    coins: increment(500),
+                    territoryCount: increment(0) // Placeholder to ensure field exists
+                  });
+                  
+                  if (attackerData.squadId) {
+                    const squadRef = doc(db, 'squads', attackerData.squadId);
+                    transaction.update(squadRef, { score: increment(1000) });
+                  }
+
+                  // Transfer Territories
+                  const victimTerritories = territories.filter(t => t.ownerId === target.uid);
+                  for (const t of victimTerritories) {
+                    const tRef = doc(db, 'territories', t.id);
+                    transaction.update(tRef, {
+                      ownerId: currentUser.uid,
+                      ownerSquadId: currentUser.squadId || 'squad_general'
+                    });
+                  }
+
+                  if (victimTerritories.length > 0) {
+                    transaction.update(attackerRef, { territoryCount: increment(victimTerritories.length) });
+                    transaction.update(enemyRef, { territoryCount: 0 });
+                    
+                    if (attackerData.squadId) {
+                      const aSquadRef = doc(db, 'squads', attackerData.squadId);
+                      transaction.update(aSquadRef, { territoryCount: increment(victimTerritories.length) });
+                    }
+                    if (enemyData.squadId) {
+                      const vSquadRef = doc(db, 'squads', enemyData.squadId);
+                      transaction.update(vSquadRef, { territoryCount: increment(-victimTerritories.length) });
+                    }
+                  }
+
+                  if (enemyData.uid.startsWith('bot_')) {
+                    transaction.delete(enemyRef);
+                  } else {
+                    transaction.update(enemyRef, { health: 0 });
+                  }
+                } else {
+                  transaction.update(enemyRef, { health: newEnemyHealth });
+                }
+                
+                finalToLat = enemyData.lat;
+                finalToLng = enemyData.lng;
+                targetId = target.uid;
+
+                // Bot retaliation logic (triggered after transaction)
+                if (enemyData.uid.startsWith('bot_') && newEnemyHealth > 0) {
+                  setTimeout(async () => {
+                    try {
+                      await runTransaction(db, async (retalTx) => {
+                        const pDoc = await retalTx.get(attackerRef);
+                        if (!pDoc.exists()) return;
+                        const pData = pDoc.data() as User;
+                        if (pData.health <= 0) return;
+                        if (pData.shieldUntil && new Date(pData.shieldUntil) > new Date()) return;
+
+                        const botDamage = 200 + Math.floor(Math.random() * 300);
+                        const pNewHealth = Math.max(0, pData.health - botDamage);
+                        retalTx.update(attackerRef, { health: pNewHealth });
+                        
+                        const bAtkId = `atk_${Date.now()}_${target.uid}`;
+                        const bAtkRef = doc(db, 'attacks', bAtkId);
+                        retalTx.set(bAtkRef, {
+                          id: bAtkId,
+                          attackerId: target.uid,
+                          targetId: currentUser.uid,
+                          fromLat: enemyData.lat,
+                          fromLng: enemyData.lng,
+                          toLat: currentUser.lat,
+                          toLng: currentUser.lng,
+                          timestamp: serverTimestamp(),
+                          type: 'bullet'
+                        });
+                      });
+                    } catch (e) {
+                      console.error("Bot retaliation failed:", e);
+                    }
+                  }, 600);
+                }
+              }
+            }
+          }
+
+          // Create attack record
+          const attackId = `atk_${Date.now()}_${currentUser.uid}`;
+          const attackRef = doc(db, 'attacks', attackId);
+          transaction.set(attackRef, {
+            id: attackId,
+            attackerId: currentUser.uid,
+            targetId: targetId,
+            fromLat: currentUser.lat,
+            fromLng: currentUser.lng,
+            toLat: finalToLat,
+            toLng: finalToLng,
+            timestamp: serverTimestamp(),
+            type: useMissile ? 'missile' : 'bullet'
+          });
+        });
+      } catch (error: any) {
+        if (retries > 0 && (error.message?.includes('version') || error.message?.includes('match') || error.message?.includes('aborted') || error.message?.includes('contention'))) {
+          const delay = (6 - retries) * 200 + Math.random() * 500;
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return executeFire(retries - 1);
+        }
+        console.error("Fire failed:", error);
+        handleFirestoreError(error, OperationType.UPDATE, `users/${currentUser.uid}`);
+      }
+    };
+
+    await executeFire();
   };
 
   const collectTreasure = async (treasure: Treasure) => {
@@ -622,61 +993,119 @@ export const useGameData = () => {
         { latitude: treasure.lat, longitude: treasure.lng }
       );
 
-      if (distance > 20) return;
-
-      // Mark treasure inactive
-      await updateDoc(doc(db, 'treasures', treasure.id), {
-        active: false
-      });
+      if (distance > 50) { // Increased from 20 to 50 for better UX
+        alert("You are too far away to collect this treasure! Get closer (within 50m).");
+        return;
+      }
 
       // Add coins
-      await updateDoc(doc(db, 'users', currentUser.uid), {
+      const updates: any = {
         coins: increment(treasure.coins)
+      };
+
+      // 20% chance to find a grenade in treasure
+      if (Math.random() < 0.2) {
+        updates.grenades = increment(1);
+        alert(`Collected ${treasure.coins} Box Coins and found a GRENADE!`);
+      } else {
+        alert(`Collected ${treasure.coins} Box Coins!`);
+      }
+
+      // Use a transaction to ensure treasure is only collected once
+      await runTransaction(db, async (transaction) => {
+        const treasureRef = doc(db, 'treasures', treasure.id);
+        const userRef = doc(db, 'users', currentUser.uid);
+        
+        const treasureDoc = await transaction.get(treasureRef);
+        if (!treasureDoc.exists() || !treasureDoc.data().active) {
+          throw new Error("Treasure already collected or does not exist");
+        }
+
+        // Mark treasure inactive
+        transaction.update(treasureRef, { active: false });
+
+        // Add coins to user
+        transaction.update(userRef, updates);
       });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `treasures/${treasure.id}`);
+    } catch (error: any) {
+      if (error.message?.includes("already collected")) {
+        alert("Someone else collected this treasure first!");
+      } else {
+        handleFirestoreError(error, OperationType.UPDATE, `treasures/${treasure.id}`);
+      }
     }
   };
 
-  const buyItem = async (type: 'ammo' | 'health' | 'gun_standard' | 'gun_expensive' | 'shield' | 'invisibility' | 'missile', cost: number) => {
-    if (!currentUser || currentUser.coins < cost) return;
-
+  const addTestCoins = async () => {
+    if (!currentUser) return;
     try {
-      const updates: any = { coins: increment(-cost) };
-
-      switch (type) {
-        case 'ammo':
-          updates.ammo = increment(30);
-          break;
-        case 'health':
-          updates.health = 10000;
-          break;
-        case 'gun_standard':
-          updates.gunQuality = 'standard';
-          break;
-        case 'gun_expensive':
-          updates.gunQuality = 'expensive';
-          break;
-        case 'shield':
-          updates.shieldUntil = new Date(Date.now() + 4 * 60 * 1000).toISOString();
-          break;
-        case 'invisibility':
-          updates.invisibleUntil = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-          break;
-        case 'missile':
-          updates.autoMissiles = increment(1);
-          break;
-      }
-
-      await updateDoc(doc(db, 'users', currentUser.uid), updates);
+      await updateDoc(doc(db, 'users', currentUser.uid), {
+        coins: increment(10000)
+      });
+      alert("Added 10,000 Box Coins to your profile!");
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${currentUser.uid}`);
     }
   };
 
-  const claimTerritory = async (territoryId?: string) => {
+  const buyItem = async (type: 'ammo' | 'health' | 'gun_standard' | 'gun_expensive' | 'shield' | 'invisibility' | 'missile' | 'grenade', cost: number) => {
+    if (!currentUser) return;
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        const userRef = doc(db, 'users', currentUser.uid);
+        const userDoc = await transaction.get(userRef);
+        
+        if (!userDoc.exists()) throw new Error("User does not exist");
+        const userData = userDoc.data() as User;
+
+        if (userData.coins < cost) {
+          throw new Error("Insufficient coins");
+        }
+
+        const updates: any = { coins: increment(-cost) };
+
+        switch (type) {
+          case 'ammo':
+            updates.ammo = increment(30);
+            break;
+          case 'health':
+            updates.health = 10000;
+            break;
+          case 'gun_standard':
+            updates.gunQuality = 'standard';
+            break;
+          case 'gun_expensive':
+            updates.gunQuality = 'expensive';
+            break;
+          case 'shield':
+            updates.shieldUntil = new Date(Date.now() + 4 * 60 * 1000).toISOString();
+            break;
+          case 'invisibility':
+            updates.invisibleUntil = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+            break;
+          case 'missile':
+            updates.autoMissiles = increment(1);
+            break;
+          case 'grenade':
+            updates.grenades = increment(1);
+            break;
+        }
+
+        transaction.update(userRef, updates);
+      });
+    } catch (error: any) {
+      if (error.message === "Insufficient coins") {
+        alert("Not enough Box Coins!");
+      } else {
+        handleFirestoreError(error, OperationType.UPDATE, `users/${currentUser.uid}`);
+      }
+    }
+  };
+
+  const purchaseTerritory = async () => {
     if (!currentUser || !currentUser.squadId) {
-      alert("You must be in a squad to claim territory!");
+      alert("You must be in a squad to purchase territory!");
       return;
     }
     if (currentUser.health <= 0) {
@@ -684,63 +1113,68 @@ export const useGameData = () => {
       return;
     }
 
-    const userSquad = squads.find(s => s.id === currentUser.squadId);
-    if (!userSquad || userSquad.leaderId !== currentUser.uid) {
-      alert("Only squad leaders can purchase/claim territories!");
-      return;
-    }
+    // Check if already inside an existing territory
+    const nearby = territories.find(t => {
+      // Square check: 500m in all directions (1000m x 1000m square)
+      const latDiff = Math.abs(currentUser.lat - t.lat);
+      const lngDiff = Math.abs(currentUser.lng - t.lng);
+      
+      // 1 degree lat is approx 111,320 meters
+      const latThreshold = 500 / 111320;
+      // 1 degree lng is approx 111,320 * cos(lat) meters
+      const lngThreshold = 500 / (111320 * Math.cos(currentUser.lat * Math.PI / 180));
+      
+      return latDiff <= latThreshold && lngDiff <= lngThreshold;
+    });
 
-    if (currentUser.coins < 100) {
-      alert("You need 100 Box Coins to buy a territory!");
-      return;
-    }
-
-    // Check if already in a territory capture zone (200m)
-    let existingTerritory = null;
-    if (territoryId) {
-      existingTerritory = territories.find(t => t.id === territoryId);
-      if (existingTerritory) {
-        const distance = getDistance(
-          { latitude: currentUser.lat, longitude: currentUser.lng },
-          { latitude: existingTerritory.lat, longitude: existingTerritory.lng }
-        );
-        if (distance > 200) {
-          alert("You are too far away to capture this territory!");
-          return;
-        }
+    if (nearby) {
+      if (nearby.ownerSquadId === currentUser.squadId) {
+        alert("Your squad already owns this territory!");
+      } else {
+        alert("This area is already owned by another squad! You must defeat the owner to capture it.");
       }
-    } else {
-      existingTerritory = territories.find(t => 
-        getDistance({ latitude: currentUser.lat, longitude: currentUser.lng }, { latitude: t.lat, longitude: t.lng }) <= 200
-      );
+      return;
     }
+
+    const cost = 1000;
 
     try {
-      if (existingTerritory) {
-        // Capture existing
-        if (existingTerritory.ownerSquadId !== currentUser.squadId) {
-          await updateDoc(doc(db, 'users', currentUser.uid), { coins: increment(-100) });
-          await updateDoc(doc(db, 'territories', existingTerritory.id), {
-            ownerSquadId: currentUser.squadId
-          });
-          alert("Territory captured!");
-        } else {
-          alert("Your squad already owns this territory!");
+      await runTransaction(db, async (transaction) => {
+        const userRef = doc(db, 'users', currentUser.uid);
+        const userDoc = await transaction.get(userRef);
+        if (!userDoc.exists()) throw new Error("User not found");
+        const userData = userDoc.data() as User;
+
+        if (userData.coins < cost) {
+          throw new Error("Insufficient coins");
         }
-      } else {
-        // Create new
-        await updateDoc(doc(db, 'users', currentUser.uid), { coins: increment(-100) });
-        const newId = `territory_${Date.now()}`;
-        await setDoc(doc(db, 'territories', newId), {
+
+        const newId = `territory_${Date.now()}_${currentUser.uid}`;
+        const territoryRef = doc(db, 'territories', newId);
+        
+        transaction.update(userRef, { 
+          coins: increment(-cost),
+          territoryCount: increment(1)
+        });
+
+        if (userData.squadId) {
+          const squadRef = doc(db, 'squads', userData.squadId);
+          transaction.update(squadRef, { territoryCount: increment(1) });
+        }
+
+        transaction.set(territoryRef, {
           id: newId,
+          ownerId: currentUser.uid,
           ownerSquadId: currentUser.squadId,
           lat: currentUser.lat,
-          lng: currentUser.lng
+          lng: currentUser.lng,
+          createdAt: new Date().toISOString()
         });
-        alert("New territory purchased and claimed!");
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'territories');
+      });
+      alert("Territory purchased successfully!");
+    } catch (error: any) {
+      if (error.message === "Insufficient coins") alert(`You need ${cost} Box Coins!`);
+      else handleFirestoreError(error, OperationType.WRITE, 'territories');
     }
   };
 
@@ -758,6 +1192,7 @@ export const useGameData = () => {
           name: `Cyber Legion ${s + 1}`,
           leaderId: leaderId,
           score: 0,
+          territoryCount: 0,
           avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=squad${s}`
         });
 
@@ -776,9 +1211,11 @@ export const useGameData = () => {
             lat: currentUser.lat + latOffset,
             lng: currentUser.lng + lngOffset,
             health: 10000,
-            coins: 1000,
+            coins: 10000,
             ammo: 999,
             autoMissiles: 0,
+            grenades: 0,
+            territoryCount: 0,
             gunQuality: b === 0 ? 'expensive' : 'standard',
             squadId: squadId,
             lastActive: new Date().toISOString()
@@ -803,6 +1240,7 @@ export const useGameData = () => {
         name: `The Decimators`,
         leaderId: leaderId,
         score: 0,
+        territoryCount: 0,
         avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=decimators`
       });
 
@@ -820,9 +1258,11 @@ export const useGameData = () => {
           lat: currentUser.lat + latOffset,
           lng: currentUser.lng + lngOffset,
           health: 10000,
-          coins: 500,
+          coins: 10000,
           ammo: 100,
           autoMissiles: 0,
+          grenades: 0,
+          territoryCount: 0,
           gunQuality: i === 0 ? 'expensive' : 'standard',
           squadId: squadId,
           lastActive: new Date().toISOString()
@@ -850,9 +1290,11 @@ export const useGameData = () => {
         lat: location.lat + latOffset,
         lng: location.lng + lngOffset,
         health: 10000,
-        coins: 100,
+        coins: 10000,
         ammo: 100,
         autoMissiles: 0,
+        grenades: 0,
+        territoryCount: 0,
         gunQuality: 'standard',
         lastActive: new Date().toISOString()
       });
@@ -884,12 +1326,14 @@ export const useGameData = () => {
     treasures,
     territories,
     attacks,
-    attackPlayer,
+    fireWeapon,
     collectTreasure,
+    throwGrenade,
     buyItem,
-    claimTerritory,
+    purchaseTerritory,
     spawnBots,
     spawnTenBots,
-    spawnTestEntities
+    spawnTestEntities,
+    addTestCoins
   };
 };

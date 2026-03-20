@@ -1,17 +1,18 @@
 import React from 'react';
 import { User } from '../types';
 import { logout } from '../firebase';
-import { LogOut, UserCircle, Bot } from 'lucide-react';
+import { LogOut, UserCircle, Bot, Coins } from 'lucide-react';
 
 interface ProfileProps {
   user: User;
   onSpawnBots: () => void;
   onSpawnTenBots: () => void;
   onSpawnTestEntities: () => void;
+  onAddCoins: () => void;
   onClose: () => void;
 }
 
-export default function Profile({ user, onSpawnBots, onSpawnTenBots, onSpawnTestEntities, onClose }: ProfileProps) {
+export default function Profile({ user, onSpawnBots, onSpawnTenBots, onSpawnTestEntities, onAddCoins, onClose }: ProfileProps) {
   return (
     <div className="absolute inset-0 bg-zinc-950/90 backdrop-blur-md z-[10000] overflow-y-auto p-4 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col">
       <div className="flex justify-between items-center mb-6">
@@ -49,6 +50,14 @@ export default function Profile({ user, onSpawnBots, onSpawnTenBots, onSpawnTest
           </div>
         </div>
       </div>
+
+      <button 
+        onClick={onAddCoins}
+        className="mb-4 w-full py-4 bg-yellow-500/20 text-yellow-500 border border-yellow-500/50 rounded-xl font-bold text-lg hover:bg-yellow-500/30 transition-colors flex items-center justify-center gap-3"
+      >
+        <Coins className="w-5 h-5" />
+        CLAIM 10,000 BOX COINS
+      </button>
 
       <button 
         onClick={onSpawnTestEntities}

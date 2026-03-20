@@ -35,33 +35,49 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidUser(data) {
-      return data.uid is string && data.uid.size() > 0 &&
-             data.displayName is string && data.displayName.size() <= 50 &&
-             data.health is number && data.health >= 0 && data.health <= 10000 &&
-             (!('ammo' in data) || (data.ammo is number && data.ammo >= 0)) &&
-             (!('coins' in data) || (data.coins is number && data.coins >= 0)) &&
-             (!('gunQuality' in data) || data.gunQuality in ['cheap', 'standard', 'expensive', 'elite']) &&
-             (!('autoMissiles' in data) || (data.autoMissiles is number && data.autoMissiles >= 0));
+      return (!('uid' in data) || (data.uid is string && data.uid.size() > 0)) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
+             (!('health' in data) || (data.health is number && data.health >= 0)) &&
+             (!('ammo' in data) || (data.ammo is number)) &&
+             (!('coins' in data) || (data.coins is number)) &&
+             (!('gunQuality' in data) || data.gunQuality is string) &&
+             (!('autoMissiles' in data) || (data.autoMissiles is number)) &&
+             (!('grenades' in data) || (data.grenades is number)) &&
+             (!('territoryCount' in data) || (data.territoryCount is number)) &&
+             (!('onlineStatus' in data) || (data.onlineStatus is bool)) &&
+             (!('lat' in data) || data.lat is number) &&
+             (!('lng' in data) || data.lng is number) &&
+             (!('lastActive' in data) || data.lastActive is string || data.lastActive == null) &&
+             (!('photoURL' in data) || data.photoURL is string || data.photoURL == null) &&
+             (!('squadId' in data) || data.squadId is string || data.squadId == null) &&
+             (!('shieldUntil' in data) || data.shieldUntil is string || data.shieldUntil == null) &&
+             (!('invisibleUntil' in data) || data.invisibleUntil is string || data.invisibleUntil == null);
     }
 
     function isValidSquad(data) {
       return data.id is string && data.id.size() > 0 &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 30 &&
+             data.name is string && data.name.size() > 0 &&
              data.leaderId is string && data.leaderId.size() > 0 &&
-             data.score is number && data.score >= 0;
+             data.score is number &&
+             (!('territoryCount' in data) || data.territoryCount is number) &&
+             (!('isWeeklyWinner' in data) || data.isWeeklyWinner is bool) &&
+             (!('avatarUrl' in data) || data.avatarUrl is string || data.avatarUrl == null);
     }
 
     function isValidTreasure(data) {
       return data.id is string && data.id.size() > 0 &&
              data.lat is number && data.lng is number &&
-             data.coins is number && data.coins > 0 &&
-             data.active is bool;
+             data.coins is number &&
+             data.active is bool &&
+             (!('createdAt' in data) || data.createdAt is string || data.createdAt == null);
     }
 
     function isValidTerritory(data) {
       return data.id is string && data.id.size() > 0 &&
-             data.ownerSquadId is string && data.ownerSquadId.size() > 0 &&
-             data.lat is number && data.lng is number;
+             data.ownerId is string &&
+             data.ownerSquadId is string &&
+             data.lat is number && data.lng is number &&
+             (!('createdAt' in data) || data.createdAt is string || data.createdAt == null);
     }
 
     function isValidAttack(data) {
@@ -70,7 +86,8 @@ service cloud.firestore {
              data.targetId is string && data.targetId.size() > 0 &&
              data.fromLat is number && data.fromLng is number &&
              data.toLat is number && data.toLng is number &&
-             data.type in ['bullet', 'missile', 'grenade'];
+             data.type is string &&
+             (data.timestamp is timestamp);
     }
 
     // ===============================================================
@@ -83,7 +100,7 @@ service cloud.firestore {
       
       // Users can only create their own profile, or anyone can create bots
       allow create: if (isOwner(userId) && 
-                    hasRequiredFields(['uid', 'displayName', 'health', 'ammo', 'coins', 'gunQuality', 'autoMissiles']) &&
+                    hasRequiredFields(['uid', 'displayName', 'health', 'ammo', 'coins', 'gunQuality', 'autoMissiles', 'grenades', 'territoryCount', 'onlineStatus']) &&
                     isValidUser(request.resource.data) &&
                     uidUnchanged()) || 
                     (isAuthenticated() && userId.matches('^bot_.*'));
@@ -95,9 +112,11 @@ service cloud.firestore {
                     uidNotModified() &&
                     (isOwner(userId) || 
                      userId.matches('^bot_.*') ||
-                     // When someone else updates, they can ONLY decrease health
-                     (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['health']) &&
-                      request.resource.data.health < resource.data.health));
+                     // When someone else updates, they can ONLY decrease health or update territoryCount (for kills)
+                     (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['health', 'territoryCount']) &&
+                      request.resource.data.health <= resource.data.health) ||
+                     (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['health'])) ||
+                     (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['territoryCount'])));
 
       // Anyone can delete bots
       allow delete: if isAuthenticated() && userId.matches('^bot_.*');
@@ -113,11 +132,11 @@ service cloud.firestore {
                     (request.resource.data.leaderId == request.auth.uid || request.resource.data.leaderId.matches('^bot_.*'));
                     
       // Only the leader can update the squad (e.g., changing name/avatar)
-      // Or anyone can update the score (prototype simplification)
+      // Or anyone can update the score or territoryCount (prototype simplification)
       allow update: if isAuthenticated() && 
                     isValidSquad(request.resource.data) &&
                     (request.auth.uid == resource.data.leaderId || 
-                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['score']));
+                     request.resource.data.diff(resource.data).affectedKeys().hasAny(['score', 'territoryCount', 'isWeeklyWinner']));
     }
 
     match /treasures/{treasureId} {
@@ -140,20 +159,21 @@ service cloud.firestore {
       
       // Anyone can claim a territory
       allow create: if isAuthenticated() && 
-                    hasRequiredFields(['id', 'ownerSquadId', 'lat', 'lng']) &&
+                    hasRequiredFields(['id', 'ownerId', 'ownerSquadId', 'lat', 'lng', 'createdAt']) &&
                     isValidTerritory(request.resource.data);
                     
       // Anyone can update territory owner
       allow update: if isAuthenticated() && 
                     isValidTerritory(request.resource.data) &&
-                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ownerSquadId']);
+                    request.resource.data.diff(resource.data).affectedKeys().hasAny(['ownerId', 'ownerSquadId']);
     }
 
     match /attacks/{attackId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && 
                     hasRequiredFields(['id', 'attackerId', 'targetId', 'fromLat', 'fromLng', 'toLat', 'toLng', 'timestamp', 'type']) &&
-                    isValidAttack(request.resource.data);
+                    isValidAttack(request.resource.data) &&
+                    (request.resource.data.attackerId == request.auth.uid || request.resource.data.attackerId.matches('^bot_.*'));
     }
 
     match /system/{document=**} {

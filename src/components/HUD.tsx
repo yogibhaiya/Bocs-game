@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User } from '../types';
-import { Heart, Crosshair, Coins, Shield, EyeOff, Rocket } from 'lucide-react';
+import { Heart, Crosshair, Coins, Shield, EyeOff, Rocket, Bomb, Map as MapIcon } from 'lucide-react';
 
 interface HUDProps {
   user: User;
   onFire: () => void;
   onFireMissile: () => void;
-  onAutoTarget: () => void;
+  onThrowGrenade: () => void;
 }
 
-export default function HUD({ user, onFire, onFireMissile, onAutoTarget }: HUDProps) {
+export default function HUD({ user, onFire, onFireMissile, onThrowGrenade }: HUDProps) {
   const [isShaking, setIsShaking] = useState(false);
   const lastHealth = useRef(user.health);
 
@@ -39,6 +39,12 @@ export default function HUD({ user, onFire, onFireMissile, onAutoTarget }: HUDPr
               />
             </div>
             <span className="text-sm font-bold font-mono text-zinc-100 drop-shadow-md">{user.health}</span>
+          </div>
+
+          {/* Territories */}
+          <div className="flex items-center gap-3 bg-zinc-950/80 backdrop-blur-md px-3 sm:px-4 py-2 rounded-2xl border border-zinc-800/50 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
+            <MapIcon className="w-5 h-5 text-emerald-500 shrink-0 drop-shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+            <span className="text-sm sm:text-base font-bold font-mono text-zinc-100 drop-shadow-md">{user.territoryCount || 0} Territories</span>
           </div>
 
           {/* Ammo */}
@@ -72,6 +78,12 @@ export default function HUD({ user, onFire, onFireMissile, onAutoTarget }: HUDPr
             <div className="flex items-center gap-2 bg-orange-950/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.3)]">
               <Rocket className="w-5 h-5 text-orange-400 drop-shadow-[0_0_8px_rgba(251,146,60,0.8)]" />
               <span className="text-xs sm:text-sm font-black tracking-wider text-orange-200 drop-shadow-md">{user.autoMissiles}</span>
+            </div>
+          )}
+          {user.grenades > 0 && (
+            <div className="flex items-center gap-2 bg-emerald-950/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-emerald-500/50 shadow-[0_0_15px_rgba(34,197,94,0.3)]">
+              <Bomb className="w-5 h-5 text-emerald-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.8)]" />
+              <span className="text-xs sm:text-sm font-black tracking-wider text-emerald-200 drop-shadow-md">{user.grenades}</span>
             </div>
           )}
         </div>
@@ -113,21 +125,23 @@ export default function HUD({ user, onFire, onFireMissile, onAutoTarget }: HUDPr
           </div>
         )}
 
-        {/* Auto Target Button */}
-        <div className="flex flex-col items-center gap-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onAutoTarget();
-            }}
-            disabled={user.health <= 0}
-            className="pointer-events-auto group relative flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-cyan-600 border-4 border-cyan-900 shadow-[0_0_30px_rgba(8,145,178,0.5)] active:scale-95 active:bg-cyan-700 transition-all disabled:opacity-50 disabled:grayscale disabled:scale-100"
-          >
-            <div className="absolute inset-0 rounded-full bg-cyan-400 animate-pulse opacity-20 group-hover:opacity-40" />
-            <Crosshair className="w-6 h-6 sm:w-8 h-8 text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
-          </button>
-          <span className="text-cyan-500 font-black text-[10px] tracking-widest uppercase drop-shadow-[0_0_5px_rgba(6,182,212,0.5)]">Lock</span>
-        </div>
+        {/* Grenade Button (Only if user has grenades) */}
+        {user.grenades > 0 && (
+          <div className="flex flex-col items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onThrowGrenade();
+              }}
+              disabled={user.health <= 0}
+              className="pointer-events-auto group relative flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-emerald-600 border-4 border-emerald-900 shadow-[0_0_30px_rgba(34,197,94,0.5)] active:scale-95 active:bg-emerald-700 transition-all disabled:opacity-50 disabled:grayscale disabled:scale-100"
+            >
+              <div className="absolute inset-0 rounded-full bg-emerald-500 animate-pulse opacity-20 group-hover:opacity-40" />
+              <Bomb className="w-8 h-8 sm:w-10 h-10 text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
+            </button>
+            <span className="text-emerald-500 font-black text-[10px] tracking-widest uppercase drop-shadow-[0_0_5px_rgba(34,197,94,0.5)]">Grenade</span>
+          </div>
+        )}
       </div>
     </div>
   );

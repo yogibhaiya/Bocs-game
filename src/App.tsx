@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { auth, loginWithGoogle, logout } from './firebase';
+import firebaseConfig from '../firebase-applet-config.json';
 import { useGameData } from './hooks/useGameData';
 import GameMap from './components/Map';
 import HUD from './components/HUD';
@@ -16,9 +17,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'map' | 'shop' | 'squad' | 'leaderboard' | 'profile' | 'territories'>('map');
   const [authError, setAuthError] = useState<string | null>(null);
   
-  const { currentUser, players, squads, treasures, territories, attacks, attackPlayer, collectTreasure, buyItem, claimTerritory, spawnBots, spawnTenBots, spawnTestEntities } = useGameData();
+  const { currentUser, players, squads, treasures, territories, attacks, fireWeapon, throwGrenade, collectTreasure, buyItem, purchaseTerritory, spawnBots, spawnTenBots, spawnTestEntities, addTestCoins } = useGameData();
   const [fireTrigger, setFireTrigger] = useState(0);
   const [missileTrigger, setMissileTrigger] = useState(0);
+  const [grenadeTrigger, setGrenadeTrigger] = useState(0);
   const [targetId, setTargetId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -26,8 +28,20 @@ export default function App() {
       setIsAuthenticated(!!user);
       setIsAuthLoading(false);
     });
-    return () => unsub();
-  }, []);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && activeTab === 'map') {
+        e.preventDefault();
+        handleFire();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      unsub();
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [activeTab]);
 
   const [loginSuccess, setLoginSuccess] = useState<string | null>(null);
 
@@ -50,37 +64,9 @@ export default function App() {
   const handleFireMissile = () => {
     setMissileTrigger(prev => prev + 1);
   };
-
-  const handleAutoTarget = () => {
-    if (!currentUser || players.length === 0) return;
-    
-    const enemies = players.filter(p => 
-      p.uid !== currentUser.uid && 
-      p.squadId !== currentUser.squadId && 
-      p.health > 0
-    );
-
-    if (enemies.length === 0) return;
-
-    let nearestEnemy: any = null;
-    let minDistance = Infinity;
-
-    enemies.forEach(enemy => {
-      const dist = Math.sqrt(
-        Math.pow(enemy.lat - currentUser.lat, 2) + 
-        Math.pow(enemy.lng - currentUser.lng, 2)
-      );
-      if (dist < minDistance) {
-        minDistance = dist;
-        nearestEnemy = enemy;
-      }
-    });
-
-    if (nearestEnemy) {
-      setTargetId(nearestEnemy.uid);
-      // Reset targetId after a short delay so the map can be panned again
-      setTimeout(() => setTargetId(null), 1000);
-    }
+  
+  const handleThrowGrenade = () => {
+    setGrenadeTrigger(prev => prev + 1);
   };
 
   if (isAuthLoading) {
@@ -116,7 +102,26 @@ export default function App() {
           {authError && (
             <div className="mb-6 p-4 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 text-sm text-left">
               <p className="font-bold mb-1">Authentication Error</p>
-              <p>{authError}</p>
+              <p className="break-words">{authError}</p>
+              
+              {authError.includes('unauthorized-domain') && (
+                <div className="mt-4 space-y-3 text-xs text-red-300">
+                  <p className="font-bold text-red-400">Action Required: Add Authorized Domains</p>
+                  <p>This domain is not authorized for Firebase Authentication. Please follow these steps:</p>
+                  <ol className="list-decimal ml-4 space-y-1">
+                    <li>Go to the <a href={`https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`} target="_blank" rel="noopener noreferrer" className="underline text-cyan-400">Firebase Console</a>.</li>
+                    <li>Go to <strong>Authentication</strong> &gt; <strong>Settings</strong> &gt; <strong>Authorized domains</strong>.</li>
+                    <li>Click <strong>Add domain</strong> and add these URLs:
+                      <ul className="mt-1 list-disc ml-4 font-mono text-[10px] bg-black/30 p-1 rounded">
+                        <li>cs-game.vercel.app</li>
+                        <li>ais-dev-7khmsaa3trxujwtz2bffu3-729554691002.asia-southeast1.run.app</li>
+                        <li>ais-pre-7khmsaa3trxujwtz2bffu3-729554691002.asia-southeast1.run.app</li>
+                      </ul>
+                    </li>
+                  </ol>
+                </div>
+              )}
+
               {authError.includes('configuration-not-found') && (
                 <p className="mt-2 text-xs text-red-300">
                   Please go to your Firebase Console &gt; Authentication &gt; Sign-in method, and enable the Google provider.
@@ -156,7 +161,12 @@ export default function App() {
     <div className="flex flex-col h-[100dvh] w-full bg-zinc-950 overflow-hidden font-sans">
       {/* Main Content Area */}
       <div className="flex-1 relative min-h-0">
-        <HUD user={currentUser} onFire={handleFire} onFireMissile={handleFireMissile} onAutoTarget={handleAutoTarget} />
+        <HUD 
+          user={currentUser} 
+          onFire={handleFire} 
+          onFireMissile={handleFireMissile} 
+          onThrowGrenade={handleThrowGrenade}
+        />
         <GameMap 
           currentUser={currentUser} 
           players={players} 
@@ -164,18 +174,20 @@ export default function App() {
           treasures={treasures} 
           territories={territories}
           attacks={attacks}
-          onAttack={attackPlayer}
+          onAttack={fireWeapon}
+          onThrowGrenade={throwGrenade}
           onCollectTreasure={collectTreasure}
-          onClaimTerritory={claimTerritory}
+          purchaseTerritory={purchaseTerritory}
           fireTrigger={fireTrigger}
           missileTrigger={missileTrigger}
+          grenadeTrigger={grenadeTrigger}
           targetId={targetId}
         />
         
         {activeTab === 'shop' && <Shop user={currentUser} onBuy={buyItem} onClose={() => setActiveTab('map')} />}
         {activeTab === 'squad' && <Squad user={currentUser} squads={squads} players={players} onClose={() => setActiveTab('map')} />}
         {activeTab === 'leaderboard' && <Leaderboard squads={squads} onClose={() => setActiveTab('map')} />}
-        {activeTab === 'profile' && <Profile user={currentUser} onSpawnBots={spawnBots} onSpawnTenBots={spawnTenBots} onSpawnTestEntities={spawnTestEntities} onClose={() => setActiveTab('map')} />}
+        {activeTab === 'profile' && <Profile user={currentUser} onSpawnBots={spawnBots} onSpawnTenBots={spawnTenBots} onSpawnTestEntities={spawnTestEntities} onAddCoins={addTestCoins} onClose={() => setActiveTab('map')} />}
         {activeTab === 'territories' && <Territories user={currentUser} territories={territories} squads={squads} onClose={() => setActiveTab('map')} />}
       </div>
 
