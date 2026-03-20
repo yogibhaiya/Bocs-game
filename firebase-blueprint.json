@@ -10,19 +10,20 @@
         "photoURL": { "type": "string" },
         "lat": { "type": "number" },
         "lng": { "type": "number" },
-        "lastActive": { "type": "string", "format": "date-time" },
+        "lastActive": { "type": "string", "description": "ISO string or Firestore Timestamp of last activity." },
         "health": { "type": "number" },
         "ammo": { "type": "number" },
         "coins": { "type": "number" },
         "squadId": { "type": "string" },
         "gunQuality": { "type": "string", "enum": ["cheap", "standard", "expensive", "elite"] },
-        "shieldUntil": { "type": "string", "format": "date-time" },
-        "invisibleUntil": { "type": "string", "format": "date-time" },
+        "shieldUntil": { "type": "string", "description": "ISO string or Firestore Timestamp." },
+        "invisibleUntil": { "type": "string", "description": "ISO string or Firestore Timestamp." },
         "autoMissiles": { "type": "number" },
         "grenades": { "type": "number" },
-        "territoryCount": { "type": "number" }
+        "territoryCount": { "type": "number" },
+        "onlineStatus": { "type": "boolean" }
       },
-      "required": ["uid", "displayName", "health", "ammo", "coins", "gunQuality", "autoMissiles", "grenades", "territoryCount"]
+      "required": ["uid", "displayName", "health", "ammo", "coins", "gunQuality", "autoMissiles", "grenades", "territoryCount", "onlineStatus"]
     },
     "Attack": {
       "title": "Attack",

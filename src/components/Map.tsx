@@ -272,7 +272,7 @@ export default function GameMap(props: GameMapProps) {
         ))}
 
         {/* Current Player */}
-        <Marker position={center} icon={createPlayerIcon(mySquad, 'self')}>
+        <Marker position={center} icon={createPlayerIcon(mySquad, 'self', currentUser.health, currentUser.displayName, true, currentUser.photoURL)}>
           <Popup>
             <div className="text-center">
               <p className="font-bold">{currentUser.displayName}</p>
@@ -328,7 +328,7 @@ export default function GameMap(props: GameMapProps) {
               <Marker 
                 key={player.uid} 
                 position={pos} 
-                icon={createPlayerIcon(playerSquad, relation, player.health, player.displayName, player.onlineStatus)}
+                icon={createPlayerIcon(playerSquad, relation, player.health, player.displayName, player.onlineStatus, player.photoURL)}
               >
                 <Popup>
                   <div className="text-center">
@@ -459,8 +459,8 @@ export default function GameMap(props: GameMapProps) {
   );
 }
 
-function createPlayerIcon(squad: Squad | undefined, relation: 'self' | 'ally' | 'enemy', health?: number, name?: string, onlineStatus?: boolean) {
-  const avatar = squad?.avatarUrl || '👤';
+function createPlayerIcon(squad: Squad | undefined, relation: 'self' | 'ally' | 'enemy', health?: number, name?: string, onlineStatus?: boolean, photoURL?: string) {
+  const avatar = squad?.avatarUrl || photoURL || '👤';
   let borderColor = '#ef4444';
   if (relation === 'self') borderColor = '#3b82f6';
   if (relation === 'ally') borderColor = '#10b981';

@@ -17,7 +17,24 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'map' | 'shop' | 'squad' | 'leaderboard' | 'profile' | 'territories'>('map');
   const [authError, setAuthError] = useState<string | null>(null);
   
-  const { currentUser, players, squads, treasures, territories, attacks, fireWeapon, throwGrenade, collectTreasure, buyItem, purchaseTerritory, spawnBots, spawnTenBots, spawnTestEntities, addTestCoins } = useGameData();
+  const { 
+    currentUser, 
+    players, 
+    squads, 
+    treasures, 
+    territories, 
+    attacks, 
+    fireWeapon, 
+    throwGrenade, 
+    collectTreasure, 
+    buyItem, 
+    purchaseTerritory, 
+    spawnBots, 
+    spawnTenBots, 
+    spawnTestEntities, 
+    addTestCoins,
+    isQuotaExceeded
+  } = useGameData();
   const [fireTrigger, setFireTrigger] = useState(0);
   const [missileTrigger, setMissileTrigger] = useState(0);
   const [grenadeTrigger, setGrenadeTrigger] = useState(0);
@@ -159,6 +176,11 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-[100dvh] w-full bg-zinc-950 overflow-hidden font-sans">
+      {isQuotaExceeded && (
+        <div className="bg-red-600 text-white text-[10px] sm:text-xs font-bold py-1 px-4 text-center animate-pulse z-[2000]">
+          ⚠️ FIRESTORE QUOTA EXCEEDED - BACKGROUND UPDATES PAUSED. RESUMING AT MIDNIGHT.
+        </div>
+      )}
       {/* Main Content Area */}
       <div className="flex-1 relative min-h-0">
         <HUD 

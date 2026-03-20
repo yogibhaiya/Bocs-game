@@ -33,9 +33,18 @@ export interface FirestoreErrorInfo {
   }
 }
 
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null, setQuotaExceeded?: (val: boolean) => void) {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  
+  if (errorMessage.includes('resource-exhausted') || errorMessage.includes('Quota exceeded')) {
+    console.warn("Firestore Quota Exceeded. Background writes paused.");
+    if (setQuotaExceeded) setQuotaExceeded(true);
+    // Do not throw for quota errors to prevent app crashes
+    return;
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage,
     authInfo: {
       userId: auth.currentUser?.uid || '',
       email: auth.currentUser?.email || '',
@@ -63,6 +72,7 @@ export const useGameData = () => {
   const [treasures, setTreasures] = useState<Treasure[]>([]);
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [attacks, setAttacks] = useState<Attack[]>([]);
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
   const { location } = useGeolocation();
   const [isAuthReady, setIsAuthReady] = useState(false);
 
@@ -99,7 +109,7 @@ export const useGameData = () => {
         if (data.health === 100) { updates.health = 10000; needsUpdate = true; data.health = 10000; }
         
         if (needsUpdate) {
-          updateDoc(doc(db, 'users', user.uid), updates).catch(e => console.error("Migration error:", e));
+          updateDoc(doc(db, 'users', user.uid), updates).catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`, setIsQuotaExceeded));
         }
         
         setCurrentUser(data);
@@ -136,9 +146,9 @@ export const useGameData = () => {
           });
         }
 
-        setDoc(doc(db, 'users', user.uid), newUser, { merge: true }).catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${user.uid}`));
+        setDoc(doc(db, 'users', user.uid), newUser, { merge: true }).catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${user.uid}`, setIsQuotaExceeded));
       }
-    }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}`));
+    }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}`, setIsQuotaExceeded));
     return () => unsub();
   }, [isAuthReady]);
 
@@ -201,10 +211,10 @@ export const useGameData = () => {
         lng: location.lng,
         lastActive: new Date().toISOString(),
         onlineStatus: true
-      }).catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`));
+      }).catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`, setIsQuotaExceeded));
 
       lastPos.current = { lat: location.lat, lng: location.lng, time: Date.now() };
-    }, 4000); // Update every 4 seconds
+    }, 20000); // Update every 20 seconds to save quota
 
     return () => {
       clearInterval(intervalId);
@@ -221,7 +231,14 @@ export const useGameData = () => {
     if (!isAuthReady) return;
     const unsub = onSnapshot(collection(db, 'users'), (snapshot) => {
       const p: User[] = [];
-      snapshot.forEach(d => p.push(d.data() as User));
+      snapshot.forEach(d => {
+        const data = d.data() as User;
+        // Sanitize Dicebear URLs from legacy data
+        if (data.photoURL && data.photoURL.includes('dicebear.com')) {
+          data.photoURL = '🤖';
+        }
+        p.push(data);
+      });
       setPlayers(p);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'users'));
     return () => unsub();
@@ -232,7 +249,14 @@ export const useGameData = () => {
     if (!isAuthReady) return;
     const unsub = onSnapshot(collection(db, 'squads'), (snapshot) => {
       const s: Squad[] = [];
-      snapshot.forEach(d => s.push(d.data() as Squad));
+      snapshot.forEach(d => {
+        const data = d.data() as Squad;
+        // Sanitize Dicebear URLs from legacy data
+        if (data.avatarUrl && data.avatarUrl.includes('dicebear.com')) {
+          data.avatarUrl = '🛡️';
+        }
+        s.push(data);
+      });
       setSquads(s);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'squads'));
     return () => unsub();
@@ -300,9 +324,10 @@ export const useGameData = () => {
   }, [territories]);
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || isQuotaExceeded) return;
     
     const interval = setInterval(() => {
+      if (isQuotaExceeded) return;
       const currentPlayers = playersRef.current;
       const currentTerritories = territoriesRef.current;
       
@@ -467,27 +492,28 @@ export const useGameData = () => {
               newLng += (lngDiff / dist) * step;
             }
 
-            // Only update if moved significantly to reduce Firestore writes
-            if (Math.abs(newLat - bot.lat) > 0.00001 || Math.abs(newLng - bot.lng) > 0.00001) {
+          // Only update if moved significantly to reduce Firestore writes
+            // Increased threshold to ~5 meters
+            if (Math.abs(newLat - bot.lat) > 0.00005 || Math.abs(newLng - bot.lng) > 0.00005) {
               await updateDoc(doc(db, 'users', bot.uid), {
                 lat: newLat,
                 lng: newLng
                 // Removed lastActive update for bots to reduce conflicts
-              });
+              }).catch(e => handleFirestoreError(e, OperationType.UPDATE, `users/${bot.uid}`, setIsQuotaExceeded));
             }
           }
         } catch (error) {
           // Ignore errors for bot movement to avoid spamming console if deleted
         }
       });
-    }, 5000); // Move every 5 seconds instead of 3
+    }, 60000); // Move every 60 seconds to save quota
 
     return () => clearInterval(interval);
   }, [currentUser?.uid]);
 
   // Automatic Treasure Spawner
   useEffect(() => {
-    if (!currentUser || !currentUser.lat || !currentUser.lng) return;
+    if (!currentUser || !currentUser.lat || !currentUser.lng || isQuotaExceeded) return;
 
     const checkAndSpawnTreasures = async () => {
       try {
@@ -520,8 +546,8 @@ export const useGameData = () => {
         });
 
         if (shouldSpawn) {
-          // Spawn 50 new treasures all over the map
-          for (let i = 0; i < 50; i++) {
+          // Spawn 10 new treasures (reduced from 50 to save quota)
+          for (let i = 0; i < 10; i++) {
             const newId = `treasure_${now}_${i}`;
             
             // 50% chance to spawn globally, 50% chance to spawn within ~50km of the player
@@ -544,31 +570,31 @@ export const useGameData = () => {
               coins: Math.floor(Math.random() * 50) + 10, // 10-60 coins
               active: true,
               createdAt: new Date().toISOString()
-            });
+            }).catch(e => handleFirestoreError(e, OperationType.CREATE, `treasures/${newId}`, setIsQuotaExceeded));
           }
-          console.log("Spawned 50 new treasures all over the map!");
+          console.log("Spawned 10 new treasures.");
         }
       } catch (error: any) {
         if (error.message?.includes('offline')) {
           console.log("Client is offline, skipping treasure spawn check.");
           return;
         }
-        console.error("Error checking/spawning treasures:", error);
+        handleFirestoreError(error, OperationType.GET, 'system/spawner', setIsQuotaExceeded);
       }
     };
 
     // Wait a few seconds for Firebase connection to establish before first check
     const timeout = setTimeout(() => {
-      if (navigator.onLine) {
+      if (navigator.onLine && !isQuotaExceeded) {
         checkAndSpawnTreasures();
       }
-    }, 3000);
+    }, 5000);
     
     const interval = setInterval(() => {
-      if (navigator.onLine) {
+      if (navigator.onLine && !isQuotaExceeded) {
         checkAndSpawnTreasures();
       }
-    }, 60000);
+    }, 3600000); // Check every 1 hour to save quota
     
     return () => {
       clearTimeout(timeout);
@@ -578,9 +604,10 @@ export const useGameData = () => {
 
   // Weekly Competition Logic
   useEffect(() => {
-    if (!currentUser || !isAuthReady) return;
+    if (!currentUser || !isAuthReady || isQuotaExceeded) return;
 
     const checkWeeklyReset = async () => {
+      if (isQuotaExceeded) return;
       try {
         const competitionRef = doc(db, 'system', 'competition');
         const now = new Date();
@@ -637,14 +664,14 @@ export const useGameData = () => {
           }
         });
       } catch (error) {
-        console.error("Weekly reset check failed:", error);
+        handleFirestoreError(error, OperationType.GET, 'system/competition', setIsQuotaExceeded);
       }
     };
 
-    const interval = setInterval(checkWeeklyReset, 60000); // Check every minute
+    const interval = setInterval(checkWeeklyReset, 3600000); // Check every 1 hour to save quota
     checkWeeklyReset();
     return () => clearInterval(interval);
-  }, [currentUser?.uid, isAuthReady, players.length, squads.length]);
+  }, [currentUser?.uid, isAuthReady, players.length, squads.length, isQuotaExceeded]);
 
   const throwGrenade = async (targetLat: number, targetLng: number) => {
     if (!currentUser) return;
@@ -981,7 +1008,7 @@ export const useGameData = () => {
   };
 
   const collectTreasure = async (treasure: Treasure) => {
-    if (!currentUser) return;
+    if (!currentUser || isQuotaExceeded) return;
     if (currentUser.health <= 0) {
       alert("You are eliminated! Buy a health pack from the shop to respawn.");
       return;
@@ -993,8 +1020,8 @@ export const useGameData = () => {
         { latitude: treasure.lat, longitude: treasure.lng }
       );
 
-      if (distance > 50) { // Increased from 20 to 50 for better UX
-        alert("You are too far away to collect this treasure! Get closer (within 50m).");
+      if (distance > 100) { 
+        alert("You are too far away to collect this treasure! Get closer (within 100m).");
         return;
       }
 
@@ -1004,11 +1031,10 @@ export const useGameData = () => {
       };
 
       // 20% chance to find a grenade in treasure
+      let foundGrenade = false;
       if (Math.random() < 0.2) {
         updates.grenades = increment(1);
-        alert(`Collected ${treasure.coins} Box Coins and found a GRENADE!`);
-      } else {
-        alert(`Collected ${treasure.coins} Box Coins!`);
+        foundGrenade = true;
       }
 
       // Use a transaction to ensure treasure is only collected once
@@ -1027,11 +1053,17 @@ export const useGameData = () => {
         // Add coins to user
         transaction.update(userRef, updates);
       });
+
+      if (foundGrenade) {
+        alert(`Collected ${treasure.coins} Box Coins and found a GRENADE!`);
+      } else {
+        alert(`Collected ${treasure.coins} Box Coins!`);
+      }
     } catch (error: any) {
       if (error.message?.includes("already collected")) {
         alert("Someone else collected this treasure first!");
       } else {
-        handleFirestoreError(error, OperationType.UPDATE, `treasures/${treasure.id}`);
+        handleFirestoreError(error, OperationType.UPDATE, `treasures/${treasure.id}`, setIsQuotaExceeded);
       }
     }
   };
@@ -1193,7 +1225,7 @@ export const useGameData = () => {
           leaderId: leaderId,
           score: 0,
           territoryCount: 0,
-          avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=squad${s}`
+          avatarUrl: '🛡️'
         });
 
         // Create 3 bots per squad
@@ -1207,7 +1239,7 @@ export const useGameData = () => {
             uid: botId,
             displayName: b === 0 ? `Commander Bot ${s+1}` : `Soldier Bot ${s+1}-${b}`,
             email: `${botId}@example.com`,
-            photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=${botId}`,
+            photoURL: '🤖',
             lat: currentUser.lat + latOffset,
             lng: currentUser.lng + lngOffset,
             health: 10000,
@@ -1241,7 +1273,7 @@ export const useGameData = () => {
         leaderId: leaderId,
         score: 0,
         territoryCount: 0,
-        avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=decimators`
+        avatarUrl: '🛡️'
       });
 
       for (let i = 0; i < 10; i++) {
@@ -1254,7 +1286,7 @@ export const useGameData = () => {
           uid: botId,
           displayName: i === 0 ? `Elite Commander` : `Bot Soldier ${i}`,
           email: `${botId}@example.com`,
-          photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=${botId}`,
+          photoURL: '🤖',
           lat: currentUser.lat + latOffset,
           lng: currentUser.lng + lngOffset,
           health: 10000,
@@ -1286,7 +1318,7 @@ export const useGameData = () => {
         uid: botId,
         displayName: `Test Bot ${Math.floor(Math.random() * 100)}`,
         email: `${botId}@example.com`,
-        photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=${botId}`,
+        photoURL: '🤖',
         lat: location.lat + latOffset,
         lng: location.lng + lngOffset,
         health: 10000,
@@ -1334,6 +1366,7 @@ export const useGameData = () => {
     spawnBots,
     spawnTenBots,
     spawnTestEntities,
-    addTestCoins
+    addTestCoins,
+    isQuotaExceeded
   };
 };
