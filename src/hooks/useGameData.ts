@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { auth } from '../firebase';
-import { User, Treasure, Territory, Attack, LeaderboardEntry, Squad } from '../types';
+import { User, Treasure, Territory, Attack, LeaderboardEntry, Squad, Landmine } from '../types';
 import { useGeolocation } from './useGeolocation';
 import { getDistance } from 'geolib';
 import { io } from 'socket.io-client';
@@ -21,6 +21,7 @@ export const useGameData = (gameStarted: boolean) => {
   const [squads, setSquads] = useState<Squad[]>([]);
   const [leaderboard, setLeaderboard] = useState<Squad[]>([]);
   const [attacks, setAttacks] = useState<Attack[]>([]);
+  const [landmines, setLandmines] = useState<Landmine[]>([]);
   const [notification, setNotification] = useState<{ message: string, type: 'hit' | 'kill' | 'miss' | 'info' } | null>(null);
   const { location, error: geoError } = useGeolocation();
   const [isAuthReady, setIsAuthReady] = useState(false);
@@ -41,14 +42,15 @@ export const useGameData = (gameStarted: boolean) => {
     const mockUser: User = {
       uid: user.uid,
       displayName: user.displayName || 'Player',
+      username: user.displayName || 'Player',
       photoURL: user.photoURL || '👤',
       lat: activeLocation?.lat || FALLBACK_LOCATION.lat,
       lng: activeLocation?.lng || FALLBACK_LOCATION.lng,
       health: 10000,
       ammo: 100,
-      grenades: 5,
-      autoMissiles: 2,
       coins: 1000,
+      points: 0,
+      level: 1,
       kills: 0,
       deaths: 0,
       squadId: 'general',
@@ -57,7 +59,10 @@ export const useGameData = (gameStarted: boolean) => {
       territoryCount: 0,
       tutorialCompleted: false,
       gunQuality: 'standard',
-      hasAssaultRifle: false
+      hasAssaultRifle: false,
+      landmines: 0,
+      autoMissiles: 2,
+      grenades: 5,
     };
     setCurrentUser(mockUser);
   };
@@ -129,18 +134,42 @@ export const useGameData = (gameStarted: boolean) => {
       players: User[], 
       territories: Territory[], 
       treasures: Treasure[],
-      squads: Squad[]
+      squads: Squad[],
+      landmines: Landmine[]
     }) => {
       console.log("Received initData:", data);
       setCurrentUser(data.player);
-      setPlayers(data.players);
-      setTerritories(data.territories);
-      setTreasures(data.treasures);
-      setSquads(data.squads);
+      
+      // Ensure uniqueness
+      const uniquePlayers = data.players.filter((p, i, a) => a.findIndex(t => t.uid === p.uid) === i);
+      const uniqueSquads = data.squads.filter((s, i, a) => a.findIndex(t => t.id === s.id) === i);
+      const uniqueTerritories = data.territories.filter((t, i, a) => a.findIndex(x => x.id === t.id) === i);
+      const uniqueTreasures = data.treasures.filter((t, i, a) => a.findIndex(x => x.id === t.id) === i);
+
+      setPlayers(uniquePlayers);
+      setTerritories(uniqueTerritories);
+      setTreasures(uniqueTreasures);
+      setSquads(uniqueSquads);
+      setLandmines(data.landmines || []);
+    });
+
+    socket.on('landminePlaced', (mine: Landmine) => {
+      setLandmines(prev => {
+        if (prev.find(m => m.id === mine.id)) return prev;
+        return [...prev, mine];
+      });
+      setNotification({ message: "Landmine placed!", type: 'info' });
+    });
+
+    socket.on('landmineExploded', (data: { id: string }) => {
+      setLandmines(prev => prev.filter(m => m.id !== data.id));
     });
 
     socket.on('squadAdded', (s: Squad) => {
-      setSquads(prev => [...prev, s]);
+      setSquads(prev => {
+        if (prev.find(sq => sq.id === s.id)) return prev;
+        return [...prev, s];
+      });
     });
 
     socket.on('playerJoined', (p: User) => {
@@ -203,11 +232,17 @@ export const useGameData = (gameStarted: boolean) => {
     });
 
     socket.on('territoryAdded', (t: Territory) => {
-      setTerritories(prev => [...prev, t]);
+      setTerritories(prev => {
+        if (prev.find(tr => tr.id === t.id)) return prev;
+        return [...prev, t];
+      });
     });
 
     socket.on('treasureAdded', (t: Treasure) => {
-      setTreasures(prev => [...prev, t]);
+      setTreasures(prev => {
+        if (prev.find(tr => tr.id === t.id)) return prev;
+        return [...prev, t];
+      });
     });
 
     socket.on('treasureCollected', (data: { id: string, collectorId: string, coins: number }) => {
@@ -218,8 +253,9 @@ export const useGameData = (gameStarted: boolean) => {
     });
 
     socket.on('leaderboardUpdated', (data: Squad[]) => {
-      setLeaderboard(data);
-      setSquads(data);
+      const uniqueSquads = data.filter((s, i, a) => a.findIndex(t => t.id === s.id) === i);
+      setLeaderboard(uniqueSquads);
+      setSquads(uniqueSquads);
     });
 
     socket.on('explosion', (data: { lat: number, lng: number, radius: number }) => {
@@ -340,6 +376,11 @@ export const useGameData = (gameStarted: boolean) => {
     socket.emit('buyTerritory');
   };
 
+  const placeLandmine = () => {
+    if (!currentUser || !activeLocation) return;
+    socket.emit('placeLandmine', { lat: activeLocation.lat, lng: activeLocation.lng });
+  };
+
   const addTestCoins = () => {
     socket.emit('addTestCoins');
   };
@@ -387,6 +428,7 @@ export const useGameData = (gameStarted: boolean) => {
     squads,
     leaderboard,
     attacks,
+    landmines,
     notification,
     location: activeLocation,
     isAuthReady,
@@ -396,6 +438,7 @@ export const useGameData = (gameStarted: boolean) => {
     collectTreasure,
     buyItem,
     purchaseTerritory,
+    placeLandmine,
     addTestCoins,
     updateAvatar,
     completeTutorial,

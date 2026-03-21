@@ -19,7 +19,7 @@ export default function Profile({ user, onSpawnBots, onSpawnTenBots, onSpawnTest
   const [showAvatars, setShowAvatars] = React.useState(false);
 
   return (
-    <div className="absolute inset-0 bg-zinc-950/90 backdrop-blur-md z-[10000] overflow-y-auto p-4 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col">
+    <div className="absolute inset-0 bg-zinc-950/90 backdrop-blur-md z-[10000] overflow-y-auto p-4 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(5rem,env(safe-area-inset-bottom))] flex flex-col">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-black text-white uppercase tracking-wider">Profile</h2>
         <button onClick={onClose} className="text-zinc-500 hover:text-white font-bold">CLOSE</button>
@@ -45,8 +45,13 @@ export default function Profile({ user, onSpawnBots, onSpawnTenBots, onSpawnTest
             </div>
           </div>
           <div>
-            <h3 className="text-xl font-bold text-white">{user.displayName}</h3>
-            <p className="text-zinc-400 text-sm font-mono">ID: {user.uid.slice(0, 8)}</p>
+            <h3 className="text-xl font-bold text-white">{user.username || user.displayName}</h3>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-zinc-500 text-[10px] font-mono uppercase tracking-widest">ID: {user.uid.slice(0, 8)}</p>
+              <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-tighter ${user.createdAt ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-800 text-zinc-500'}`}>
+                {user.createdAt ? 'Verified' : 'Guest'}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -72,20 +77,28 @@ export default function Profile({ user, onSpawnBots, onSpawnTenBots, onSpawnTest
         
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-zinc-950 p-4 rounded-lg border border-zinc-800">
-            <p className="text-zinc-500 text-xs uppercase font-bold mb-1">Health</p>
-            <p className="text-emerald-400 font-mono text-xl">{user.health}</p>
+            <p className="text-zinc-500 text-[10px] uppercase font-bold mb-1">Level</p>
+            <p className="text-white font-mono text-xl">{user.level || 1}</p>
           </div>
           <div className="bg-zinc-950 p-4 rounded-lg border border-zinc-800">
-            <p className="text-zinc-500 text-xs uppercase font-bold mb-1">Box Coins</p>
+            <p className="text-zinc-500 text-[10px] uppercase font-bold mb-1">Combat Points</p>
+            <p className="text-cyan-400 font-mono text-xl">{user.points || 0}</p>
+          </div>
+          <div className="bg-zinc-950 p-4 rounded-lg border border-zinc-800">
+            <p className="text-zinc-500 text-[10px] uppercase font-bold mb-1">Territories</p>
+            <p className="text-emerald-400 font-mono text-xl">{user.territoryCount || 0}</p>
+          </div>
+          <div className="bg-zinc-950 p-4 rounded-lg border border-zinc-800">
+            <p className="text-zinc-500 text-[10px] uppercase font-bold mb-1">Box Coins</p>
             <p className="text-yellow-400 font-mono text-xl">{user.coins}</p>
           </div>
           <div className="bg-zinc-950 p-4 rounded-lg border border-zinc-800">
-            <p className="text-zinc-500 text-xs uppercase font-bold mb-1">Ammo</p>
-            <p className="text-cyan-400 font-mono text-xl">{user.ammo}</p>
+            <p className="text-zinc-500 text-[10px] uppercase font-bold mb-1">Health</p>
+            <p className="text-red-400 font-mono text-xl">{user.health}</p>
           </div>
           <div className="bg-zinc-950 p-4 rounded-lg border border-zinc-800">
-            <p className="text-zinc-500 text-xs uppercase font-bold mb-1">Missiles</p>
-            <p className="text-orange-400 font-mono text-xl">{user.autoMissiles}</p>
+            <p className="text-zinc-500 text-[10px] uppercase font-bold mb-1">Ammo</p>
+            <p className="text-cyan-400 font-mono text-xl">{user.ammo}</p>
           </div>
         </div>
       </div>

@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { auth, loginWithGoogle } from './firebase';
+import { 
+  auth, 
+  loginWithGoogle, 
+  handleRedirectResult, 
+  loginAnonymously, 
+  getUserData,
+  GameUser
+} from './firebase';
 import { useGameData } from './hooks/useGameData';
 import GameMap from './components/Map';
 import HUD from './components/HUD';
@@ -8,14 +15,17 @@ import Squad from './components/Squad';
 import Leaderboard from './components/Leaderboard';
 import Profile from './components/Profile';
 import Territories from './components/Territories';
-import { ShoppingCart, Users, Trophy, Map as MapIcon, UserCircle, Flag } from 'lucide-react';
+import { ShoppingCart, Users, Trophy, Map as MapIcon, UserCircle, Flag, Play, LogIn } from 'lucide-react';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [showFailSafe, setShowFailSafe] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [gameUserData, setGameUserData] = useState<GameUser | null>(null);
 
   const [activeTab, setActiveTab] = useState<'map' | 'shop' | 'squad' | 'leaderboard' | 'profile' | 'territories'>('map');
+  const [isSigningIn, setIsSigningIn] = useState(false);
 
   const {
     currentUser,
@@ -24,12 +34,14 @@ export default function App() {
     treasures,
     territories,
     attacks,
+    landmines,
     leaderboard,
     fireWeapon,
     throwGrenade,
     collectTreasure,
     buyItem,
     purchaseTerritory,
+    placeLandmine,
     updateAvatar,
     isQuotaExceeded,
     attackPlayer,
@@ -56,9 +68,28 @@ export default function App() {
   }, [currentUser]);
 
   useEffect(() => {
-    const unsub = auth.onAuthStateChanged((user) => {
+    // Handle redirect result on mount
+    const checkRedirect = async () => {
+      try {
+        const user = await handleRedirectResult();
+        if (user) {
+          setGameUserData(user);
+        }
+      } catch (e) {
+        console.error("Redirect error:", e);
+      }
+    };
+    checkRedirect();
+
+    const unsub = auth.onAuthStateChanged(async (user) => {
       console.log("Auth state changed:", !!user);
       setIsAuthenticated(!!user);
+      if (user) {
+        const data = await getUserData(user.uid);
+        setGameUserData(data);
+      } else {
+        setGameUserData(null);
+      }
       setIsAuthLoading(false);
     });
 
@@ -99,9 +130,6 @@ export default function App() {
 
   useEffect(() => {
     if (grenadeTrigger > 0) {
-      // For grenade we need a target, but HUD call might not have one.
-      // In a real game, this might throw at current location or crosshair.
-      // For now, let's just trigger it at current player location if no target.
       if (currentUser) throwGrenade(currentUser.lat, currentUser.lng);
     }
   }, [grenadeTrigger]);
@@ -113,13 +141,47 @@ export default function App() {
     }
   }, [isAuthenticated, currentUser]);
 
-  const handleLogin = async () => {
-    console.log("Login initiated");
+  const handleGoogleLogin = async () => {
+    console.log("Google Login initiated");
+    setAuthError(null);
+    setIsSigningIn(true);
     try {
-      await loginWithGoogle();
-      console.log("Login successful");
-    } catch (e) {
-      console.error("Login error:", e);
+      const data = await loginWithGoogle();
+      if (data) setGameUserData(data);
+      console.log("Google Login successful");
+    } catch (e: any) {
+      console.error("Google Login error:", e);
+      handleAuthError(e);
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleGuestLogin = async () => {
+    console.log("Guest Login initiated");
+    setAuthError(null);
+    setIsSigningIn(true);
+    try {
+      const data = await loginAnonymously();
+      if (data) setGameUserData(data);
+      console.log("Guest Login successful");
+    } catch (e: any) {
+      console.error("Guest Login error:", e);
+      handleAuthError(e);
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleAuthError = (e: any) => {
+    if (e.code === 'auth/unauthorized-domain') {
+      setAuthError(`The domain "${window.location.hostname}" is not authorized in Firebase. Please add it to the "Authorized domains" list in the Firebase Console.`);
+    } else if (e.code === 'auth/popup-blocked') {
+      setAuthError("Sign-in popup was blocked by your browser. Please allow popups for this site and try again.");
+    } else if (e.code === 'auth/cancelled-popup-request') {
+      setAuthError("Sign-in was cancelled. Please try again.");
+    } else {
+      setAuthError(e.message || "An error occurred during login.");
     }
   };
 
@@ -127,7 +189,10 @@ export default function App() {
   if (isAuthLoading) {
     return (
       <div className="min-h-[100dvh] bg-black flex items-center justify-center text-white">
-        Loading...
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-cyan-400/20 border-t-cyan-400 rounded-full animate-spin" />
+          <p className="font-mono text-xs uppercase tracking-widest text-zinc-500">Initializing Combat Systems...</p>
+        </div>
       </div>
     );
   }
@@ -135,19 +200,47 @@ export default function App() {
   // 🔥 LOGIN SCREEN
   if (!isAuthenticated) {
     return (
-      <div className="min-h-[100dvh] bg-black flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-2xl p-8 text-center shadow-2xl">
-          <h1 className="text-6xl font-black text-cyan-400 mb-2 tracking-tighter">BOCS</h1>
-          <p className="text-zinc-500 font-mono text-xs uppercase tracking-[0.2em] mb-12">Tactical Combat</p>
+      <div className="min-h-[100dvh] bg-black flex items-center justify-center p-4 relative overflow-hidden">
+        {/* Background Glow */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-cyan-500/10 blur-[120px] rounded-full pointer-events-none" />
+        
+        <div className="max-w-md w-full bg-zinc-900/80 backdrop-blur-xl border border-zinc-800 rounded-3xl p-8 text-center shadow-2xl relative z-10">
+          <div className="mb-8">
+            <h1 className="text-7xl font-black text-white mb-1 tracking-tighter italic">BOCS</h1>
+            <p className="text-cyan-400 font-mono text-[10px] uppercase tracking-[0.4em] font-bold">Battle of Controlled Sectors</p>
+          </div>
 
           <div className="space-y-4">
-            <p className="text-zinc-400 text-sm mb-4">Sign in to join the battlefield</p>
+            {authError && (
+              <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-left">
+                <p className="text-red-400 text-xs font-mono leading-relaxed">
+                  <span className="font-bold block mb-1 uppercase text-[10px]">System Alert</span>
+                  {authError}
+                </p>
+              </div>
+            )}
+
             <button 
-              onClick={handleLogin} 
-              className="w-full py-4 bg-white text-black rounded-xl font-bold hover:bg-zinc-200 transition-all active:scale-95"
+              onClick={handleGuestLogin} 
+              disabled={isSigningIn}
+              className="w-full py-5 bg-cyan-500 text-black rounded-2xl font-black uppercase tracking-wider hover:bg-cyan-400 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3 shadow-[0_0_20px_rgba(6,182,212,0.3)]"
             >
-              Sign in with Google
+              <Play size={20} fill="currentColor" />
+              Play Now (Guest)
             </button>
+
+            <button 
+              onClick={handleGoogleLogin} 
+              disabled={isSigningIn}
+              className="w-full py-5 bg-white/5 text-white border border-white/10 rounded-2xl font-bold hover:bg-white/10 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3"
+            >
+              <LogIn size={18} />
+              {auth.currentUser?.isAnonymous ? "Upgrade to Google" : "Continue with Google"}
+            </button>
+            
+            <p className="text-zinc-500 text-[10px] uppercase tracking-widest mt-6">
+              Persistent progress requires Google account
+            </p>
           </div>
         </div>
       </div>
@@ -159,13 +252,15 @@ export default function App() {
     return (
       <div className="min-h-[100dvh] bg-black flex flex-col items-center justify-center text-white p-6">
         <div className="relative">
-          <div className="animate-spin w-16 h-16 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full"></div>
+          <div className="w-24 h-24 border-4 border-zinc-800 border-t-cyan-400 rounded-full animate-spin mb-8" />
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-2 h-2 bg-cyan-500 rounded-full animate-ping"></div>
+            <UserCircle size={32} className="text-zinc-700" />
           </div>
         </div>
-        <h2 className="mt-8 font-black text-2xl tracking-tighter">SYNCHRONIZING</h2>
-        <p className="text-zinc-500 text-sm mt-2 font-mono uppercase tracking-widest">Fetching player profile...</p>
+        <h2 className="text-xl font-black mb-2 uppercase tracking-tighter italic">Deploying Operative</h2>
+        <p className="text-zinc-500 font-mono text-xs uppercase tracking-widest text-center max-w-xs">
+          Establishing secure link to sector {Math.floor(Math.random() * 999)}...
+        </p>
         
         {showFailSafe && (
           <div className="mt-8 p-4 bg-zinc-900 border border-zinc-800 rounded-xl text-center max-w-xs">
@@ -217,6 +312,7 @@ export default function App() {
         onFireMissile={() => setMissileTrigger(p => p + 1)}
         onThrowGrenade={() => setGrenadeTrigger(p => p + 1)}
         onPurchaseTerritory={purchaseTerritory}
+        onPlaceLandmine={placeLandmine}
       />
 
       {/* MAP */}
@@ -226,6 +322,7 @@ export default function App() {
         treasures={treasures}
         territories={territories}
         attacks={attacks}
+        landmines={landmines}
         onMapClick={moveTo}
         onCollectTreasure={collectTreasure}
         onAttackPlayer={attackPlayer}
@@ -250,13 +347,43 @@ export default function App() {
       {activeTab === 'territories' && <Territories user={currentUser} territories={territories} squads={squads} onClose={() => setActiveTab('map')} />}
 
       {/* NAV */}
-      <div className="bg-zinc-900 flex justify-around p-2">
-        <button onClick={() => setActiveTab('map')}><MapIcon /></button>
-        <button onClick={() => setActiveTab('squad')}><Users /></button>
-        <button onClick={() => setActiveTab('territories')}><Flag /></button>
-        <button onClick={() => setActiveTab('shop')}><ShoppingCart /></button>
-        <button onClick={() => setActiveTab('leaderboard')}><Trophy /></button>
-        <button onClick={() => setActiveTab('profile')}><UserCircle /></button>
+      <div className="fixed bottom-0 left-0 w-full bg-zinc-900/90 backdrop-blur-md border-t border-zinc-800 flex justify-around p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] z-[50000]">
+        <button 
+          onClick={() => setActiveTab('map')}
+          className={`p-2 rounded-xl transition-all ${activeTab === 'map' ? 'text-cyan-400 bg-cyan-400/10' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >
+          <MapIcon size={24} />
+        </button>
+        <button 
+          onClick={() => setActiveTab('squad')}
+          className={`p-2 rounded-xl transition-all ${activeTab === 'squad' ? 'text-emerald-400 bg-emerald-400/10' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >
+          <Users size={24} />
+        </button>
+        <button 
+          onClick={() => setActiveTab('territories')}
+          className={`p-2 rounded-xl transition-all ${activeTab === 'territories' ? 'text-yellow-400 bg-yellow-400/10' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >
+          <Flag size={24} />
+        </button>
+        <button 
+          onClick={() => setActiveTab('shop')}
+          className={`p-2 rounded-xl transition-all ${activeTab === 'shop' ? 'text-blue-400 bg-blue-400/10' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >
+          <ShoppingCart size={24} />
+        </button>
+        <button 
+          onClick={() => setActiveTab('leaderboard')}
+          className={`p-2 rounded-xl transition-all ${activeTab === 'leaderboard' ? 'text-orange-400 bg-orange-400/10' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >
+          <Trophy size={24} />
+        </button>
+        <button 
+          onClick={() => setActiveTab('profile')}
+          className={`p-2 rounded-xl transition-all ${activeTab === 'profile' ? 'text-purple-400 bg-purple-400/10' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >
+          <UserCircle size={24} />
+        </button>
       </div>
 
     </div>

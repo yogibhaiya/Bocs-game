@@ -10,9 +10,10 @@ interface HUDProps {
   onFireMissile: () => void;
   onThrowGrenade: () => void;
   onPurchaseTerritory: () => void;
+  onPlaceLandmine: () => void;
 }
 
-export default function HUD({ user, territories, onFire, onFireMissile, onThrowGrenade, onPurchaseTerritory }: HUDProps) {
+export default function HUD({ user, territories, onFire, onFireMissile, onThrowGrenade, onPurchaseTerritory, onPlaceLandmine }: HUDProps) {
   const [isShaking, setIsShaking] = useState(false);
   const lastHealth = useRef(user.health);
   const fireInterval = useRef<NodeJS.Timeout | null>(null);
@@ -67,6 +68,21 @@ export default function HUD({ user, territories, onFire, onFireMissile, onThrowG
     <div className={`fixed top-0 left-0 w-full h-full p-4 pt-[max(1rem,env(safe-area-inset-top))] pointer-events-none z-[9999] flex flex-col justify-between transition-transform duration-75 ${isShaking ? 'translate-x-1 translate-y-1' : ''}`}>
       <div className="flex justify-between items-start w-full">
         <div className="flex flex-col gap-2 pointer-events-auto">
+          {/* Player Info */}
+          <div className="flex flex-col mb-2">
+            <h1 className="text-lg font-black text-white italic tracking-tighter drop-shadow-[0_0_10px_rgba(0,0,0,0.8)]">
+              {user.username || user.displayName}
+            </h1>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black text-cyan-400 uppercase tracking-widest bg-cyan-400/10 px-2 py-0.5 rounded-full border border-cyan-400/20">
+                LVL {user.level || 1}
+              </span>
+              <span className="text-[10px] font-black text-yellow-400 uppercase tracking-widest bg-yellow-400/10 px-2 py-0.5 rounded-full border border-yellow-400/20">
+                {user.points || 0} PTS
+              </span>
+            </div>
+          </div>
+
           {/* Health */}
           <div className="flex items-center gap-2 bg-zinc-950/80 backdrop-blur-md px-2 py-1 rounded-xl border border-zinc-800/50 shadow-[0_0_10px_rgba(0,0,0,0.5)]">
             <Heart className="w-4 h-4 text-red-500 shrink-0 drop-shadow-[0_0_5px_rgba(239,68,68,0.8)]" />
@@ -124,11 +140,35 @@ export default function HUD({ user, territories, onFire, onFireMissile, onThrowG
               <span className="text-xs sm:text-sm font-black tracking-wider text-emerald-200 drop-shadow-md">{user.grenades}</span>
             </div>
           )}
+          {user.landmines > 0 && (
+            <div className="flex items-center gap-2 bg-red-950/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.3)]">
+              <Bomb className="w-5 h-5 text-red-400 drop-shadow-[0_0_8px_rgba(248,113,113,0.8)]" />
+              <span className="text-xs sm:text-sm font-black tracking-wider text-red-200 drop-shadow-md">{user.landmines}</span>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Fire Buttons */}
       <div className="flex justify-end items-end gap-4 sm:gap-6 pb-24 sm:pb-32 pr-4 sm:pr-8">
+        {/* Landmine Button */}
+        {user.landmines > 0 && (
+          <div className="flex flex-col items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onPlaceLandmine();
+              }}
+              disabled={user.health <= 0 || !currentTerritory || currentTerritory.ownerId !== user.uid}
+              className="pointer-events-auto group relative flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-red-800 border-4 border-red-950 shadow-[0_0_30px_rgba(153,27,27,0.5)] active:scale-95 transition-all disabled:opacity-50 disabled:grayscale disabled:scale-100"
+            >
+              <div className="absolute inset-0 rounded-full bg-red-500 animate-pulse opacity-20 group-hover:opacity-40" />
+              <Bomb className="w-8 h-8 sm:w-10 h-10 text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
+            </button>
+            <span className="text-red-500 font-black text-[10px] tracking-widest uppercase drop-shadow-[0_0_5px_rgba(239,68,68,0.5)]">Landmine</span>
+          </div>
+        )}
+
         {/* Territory Purchase/Capture */}
         {(canPurchase || canCapture) && (
           <div className="flex flex-col items-center gap-2">

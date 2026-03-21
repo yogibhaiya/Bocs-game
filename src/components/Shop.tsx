@@ -4,7 +4,7 @@ import { ShoppingCart, Heart, Crosshair, Shield, EyeOff, Rocket, Zap, Bomb } fro
 
 interface ShopProps {
   user: User;
-  onBuy: (type: 'ammo' | 'health' | 'gun_standard' | 'gun_expensive' | 'shield' | 'invisibility' | 'missile' | 'grenade', cost: number) => void;
+  onBuy: (type: 'ammo' | 'health' | 'gun_standard' | 'gun_expensive' | 'shield' | 'invisibility' | 'missile' | 'grenade' | 'landmine', cost: number) => void;
   onClose: () => void;
 }
 
@@ -18,10 +18,11 @@ export default function Shop({ user, onBuy, onClose }: ShopProps) {
     { id: 'invisibility', name: 'Stealth Cloak', cost: 150, icon: EyeOff, type: 'invisibility', desc: 'Invisible on map for 30 mins' },
     { id: 'missile', name: 'Auto Missile', cost: 200, icon: Rocket, type: 'missile', desc: 'Tracks enemy automatically' },
     { id: 'grenade', name: 'Grenade', cost: 100, icon: Bomb, type: 'grenade', desc: 'Splash damage (100m radius)' },
+    { id: 'landmine', name: 'Landmine', cost: 150, icon: Bomb, type: 'landmine', desc: 'Explodes when enemy is within 5m (Place in own territory)' },
   ];
 
   return (
-    <div className="absolute inset-0 bg-zinc-950/90 backdrop-blur-md z-[10000] flex flex-col p-6 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))] overflow-y-auto">
+    <div className="absolute inset-0 bg-zinc-950/90 backdrop-blur-md z-[10000] flex flex-col p-6 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(5rem,env(safe-area-inset-bottom))] overflow-y-auto">
       <div className="flex justify-between items-center mb-8">
         <h2 className="text-2xl font-black text-white flex items-center gap-3">
           <ShoppingCart className="text-cyan-400" />

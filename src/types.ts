@@ -9,12 +9,13 @@ export interface Attack {
   toLat: number;
   toLng: number;
   timestamp: any;
-  type?: 'bullet' | 'missile' | 'grenade' | 'assault';
+  type?: 'bullet' | 'missile' | 'grenade' | 'assault' | 'landmine';
 }
 
 export interface User {
   uid: string;
   displayName: string;
+  username: string;
   photoURL: string;
   lat: number;
   lng: number;
@@ -22,11 +23,14 @@ export interface User {
   health: number;
   ammo: number;
   coins: number;
+  points: number;
+  level: number;
   squadId: string;
   gunQuality: GunQuality;
   hasAssaultRifle: boolean;
   autoMissiles: number;
   grenades: number;
+  landmines: number;
   territoryCount: number;
   onlineStatus: boolean;
   kills: number;
@@ -34,6 +38,15 @@ export interface User {
   tutorialCompleted?: boolean;
   shieldUntil?: string;
   invisibleUntil?: string;
+  createdAt?: any;
+}
+
+export interface Landmine {
+  id: string;
+  ownerId: string;
+  lat: number;
+  lng: number;
+  active: boolean;
 }
 
 export interface Squad {

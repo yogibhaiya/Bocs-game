@@ -1,6 +1,6 @@
 {
-  "name": "BOCS",
-  "description": "Real-time multiplayer squad-based shooting game using GPS.",
+  "name": "BOCS: Battle of Controlled Sectors",
+  "description": "A real-time GPS-based multiplayer strategy and shooting game where squads compete to capture and control territories.",
   "requestFramePermissions": [
     "geolocation"
   ]

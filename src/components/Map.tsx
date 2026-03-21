@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
-import { User, Territory, Treasure, Attack } from "../types";
+import { User, Territory, Treasure, Attack, Landmine } from "../types";
 
 interface MapProps {
   currentUser: User | null;
@@ -8,6 +8,7 @@ interface MapProps {
   territories: Territory[];
   treasures: Treasure[];
   attacks: Attack[];
+  landmines: Landmine[];
   onMapClick: (lat: number, lng: number) => void;
   onCollectTreasure: (treasure: Treasure) => void;
   onAttackPlayer: (targetId: string) => void;
@@ -20,6 +21,7 @@ export default function GameMap({
   territories, 
   treasures, 
   attacks, 
+  landmines,
   onMapClick, 
   onCollectTreasure, 
   onAttackPlayer,
@@ -35,6 +37,7 @@ export default function GameMap({
   const markers = useRef<Record<string, any>>({});
   const territoryCircles = useRef<Record<string, google.maps.Circle>>({});
   const treasureMarkers = useRef<Record<string, google.maps.Marker>>({});
+  const landmineMarkers = useRef<Record<string, google.maps.Marker>>({});
   const [isMapLoaded, setIsMapLoaded] = useState(false);
 
   // 🟢 INIT MAP (ONLY ONCE)
@@ -276,9 +279,78 @@ export default function GameMap({
           }
         };
         animate();
+      } else if (attack.type === 'landmine') {
+        const circle = new google.maps.Circle({
+          strokeColor: "#ef4444",
+          strokeOpacity: 0.8,
+          strokeWeight: 2,
+          fillColor: "#ef4444",
+          fillOpacity: 0.5,
+          map: mapInstance.current,
+          center: { lat: attack.toLat, lng: attack.toLng },
+          radius: 0,
+        });
+
+        let radius = 0;
+        const animate = () => {
+          radius += 2;
+          circle.setRadius(radius);
+          if (radius < 15) {
+            requestAnimationFrame(animate);
+          } else {
+            setTimeout(() => circle.setMap(null), 300);
+          }
+        };
+        animate();
       }
     });
   }, [attacks, isMapLoaded]);
+
+  // 💣 UPDATE LANDMINES
+  useEffect(() => {
+    if (!isMapLoaded || !mapInstance.current) return;
+
+    landmines.forEach(m => {
+      // Only show my landmines (as per requirement: Only the player who plays the landmine can see it)
+      if (currentUser?.uid !== m.ownerId) {
+        if (landmineMarkers.current[m.id]) {
+          landmineMarkers.current[m.id].setMap(null);
+          delete landmineMarkers.current[m.id];
+        }
+        return;
+      }
+
+      if (!m.active) {
+        if (landmineMarkers.current[m.id]) {
+          landmineMarkers.current[m.id].setMap(null);
+          delete landmineMarkers.current[m.id];
+        }
+        return;
+      }
+
+      if (!landmineMarkers.current[m.id]) {
+        landmineMarkers.current[m.id] = new google.maps.Marker({
+          position: { lat: m.lat, lng: m.lng },
+          map: mapInstance.current,
+          icon: {
+            url: "https://cdn-icons-png.flaticon.com/512/565/565547.png", // Landmine/Explosive icon
+            scaledSize: new google.maps.Size(24, 24),
+            anchor: new google.maps.Point(12, 12)
+          },
+          title: `Landmine at ${m.lat.toFixed(4)}, ${m.lng.toFixed(4)}`,
+          clickable: false
+        });
+      }
+    });
+
+    // Cleanup detonated landmines
+    Object.keys(landmineMarkers.current).forEach(id => {
+      if (!landmines.find(m => m.id === id)) {
+        landmineMarkers.current[id].setMap(null);
+        delete landmineMarkers.current[id];
+      }
+    });
+  }, [landmines, isMapLoaded, currentUser]);
 
   // 💎 UPDATE TREASURES
   useEffect(() => {

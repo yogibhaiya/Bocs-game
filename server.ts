@@ -3,7 +3,21 @@ import { createServer as createViteServer } from "vite";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import path from "path";
+import fs from "fs";
 import { getDistance, isPointWithinRadius } from "geolib";
+import * as admin from "firebase-admin";
+
+// Load Firebase config
+const firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), "firebase-applet-config.json"), "utf8"));
+
+// Initialize Firebase Admin
+admin.initializeApp({
+  projectId: firebaseConfig.projectId,
+});
+
+const db = firebaseConfig.firestoreDatabaseId 
+  ? admin.firestore(firebaseConfig.firestoreDatabaseId)
+  : admin.firestore();
 
 // Types for the game state
 interface Player {
@@ -16,6 +30,7 @@ interface Player {
   ammo: number;
   grenades: number;
   missiles: number;
+  landmines: number;
   coins: number;
   kills: number;
   deaths: number;
@@ -25,6 +40,14 @@ interface Player {
   lastActive: number;
   lastMissileTime: number;
   hasAssaultRifle: boolean;
+}
+
+interface Landmine {
+  id: string;
+  ownerId: string;
+  lat: number;
+  lng: number;
+  active: boolean;
 }
 
 interface Territory {
@@ -67,14 +90,142 @@ async function startServer() {
   const territories: Record<string, Territory> = {};
   const treasures: Record<string, Treasure> = {};
   const squads: Record<string, Squad> = {};
+  const landmines: Record<string, Landmine> = {};
   const bots: string[] = [];
+
+  // Persistence helpers
+  enum OperationType {
+    CREATE = 'create',
+    UPDATE = 'update',
+    DELETE = 'delete',
+    LIST = 'list',
+    GET = 'get',
+    WRITE = 'write',
+  }
+
+  function handleFirestoreError(error: any, operationType: OperationType, path: string | null) {
+    const errInfo = {
+      error: error instanceof Error ? error.message : String(error),
+      operationType,
+      path,
+      isServer: true
+    };
+    console.error('Firestore Error: ', JSON.stringify(errInfo));
+  }
+
+  async function savePlayer(uid: string) {
+    if (uid.startsWith('bot_')) return;
+    const p = players[uid];
+    if (!p) return;
+    try {
+      await db.collection("users").doc(uid).set(p);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `users/${uid}`);
+    }
+  }
+
+  async function saveSquad(squadId: string) {
+    const s = squads[squadId];
+    if (!s) return;
+    try {
+      await db.collection("squads").doc(squadId).set(s);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `squads/${squadId}`);
+    }
+  }
+
+  async function saveTerritory(territoryId: string) {
+    const t = territories[territoryId];
+    if (!t) return;
+    try {
+      await db.collection("territories").doc(territoryId).set(t);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `territories/${territoryId}`);
+    }
+  }
+
+  async function saveTreasure(treasureId: string) {
+    const t = treasures[treasureId];
+    if (!t) return;
+    try {
+      await db.collection("treasures").doc(treasureId).set(t);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `treasures/${treasureId}`);
+    }
+  }
+
+  // Load initial data from Firestore
+  async function loadInitialData() {
+    try {
+      // Test connection
+      try {
+        await db.collection('test').doc('connection').get();
+      } catch (error: any) {
+        if (error.message?.includes('offline')) {
+          console.error("Please check your Firebase configuration. Firestore appears to be offline.");
+        }
+      }
+
+      const usersSnap = await db.collection("users").get();
+      usersSnap.forEach(doc => {
+        const p = doc.data() as Player;
+        p.onlineStatus = false; // Everyone starts offline on server restart
+        players[p.uid] = p;
+      });
+
+      const squadsSnap = await db.collection("squads").get();
+      squadsSnap.forEach(doc => {
+        squads[doc.id] = doc.data() as Squad;
+      });
+
+      const territoriesSnap = await db.collection("territories").get();
+      territoriesSnap.forEach(doc => {
+        territories[doc.id] = doc.data() as Territory;
+      });
+
+      const treasuresSnap = await db.collection("treasures").get();
+      treasuresSnap.forEach(doc => {
+        treasures[doc.id] = doc.data() as Treasure;
+      });
+
+      console.log(`Loaded ${Object.keys(players).length} players, ${Object.keys(squads).length} squads, ${Object.keys(territories).length} territories, ${Object.keys(treasures).length} treasures.`);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.LIST, "initial_load");
+    }
+  }
+
+  await loadInitialData();
 
   const WEAPONS = {
     GUN: { range: 100, damage: 200, ammoCost: 1 },
     ASSAULT_RIFLE: { range: 120, damage: 150, ammoCost: 1, fireRate: 100 },
     GRENADE: { range: 80, radius: 100, damage: 1500, ammoCost: 1 },
-    MISSILE: { range: 300, damage: 3000, ammoCost: 1, cooldown: 10000 }
+    MISSILE: { range: 300, damage: 3000, ammoCost: 1, cooldown: 10000 },
+    LANDMINE: { triggerRadius: 5, damage: 10000 }
   };
+
+  // Landmine trigger loop
+  setInterval(() => {
+    Object.values(landmines).forEach(mine => {
+      if (!mine.active) return;
+      Object.values(players).forEach(p => {
+        if (p.uid === mine.ownerId || p.health <= 0 || !p.onlineStatus) return;
+        const dist = getDistance(
+          { latitude: mine.lat, longitude: mine.lng },
+          { latitude: p.lat, longitude: p.lng }
+        );
+        if (dist <= WEAPONS.LANDMINE.triggerRadius) {
+          mine.active = false;
+          p.health = 0;
+          io.emit("explosion", { lat: mine.lat, lng: mine.lng, radius: 10 });
+          io.emit("playerHit", { targetId: p.uid, attackerId: mine.ownerId, damage: WEAPONS.LANDMINE.damage, weapon: "landmine", newHealth: 0 });
+          handleKill(mine.ownerId, p.uid);
+          delete landmines[mine.id];
+          io.emit("landmineExploded", { id: mine.id });
+        }
+      });
+    });
+  }, 500);
 
   const SPAWN_RADIUS = 0.05; // ~5km
   const CENTER_LAT = 22.5726; // Default center
@@ -158,48 +309,78 @@ async function startServer() {
     
     if (killer.squadId && squads[killer.squadId]) {
       squads[killer.squadId].score += 100;
+      saveSquad(killer.squadId);
       broadcastLeaderboard();
     }
+
+    savePlayer(killerId);
+    savePlayer(victimId);
 
     io.emit("playerKilled", { killerId, victimId });
     io.to(killerId).emit("statsUpdated", { kills: killer.kills, coins: killer.coins });
     io.to(victimId).emit("statsUpdated", { deaths: victim.deaths, health: victim.health, ammo: victim.ammo });
   }
 
+  // Periodic save for all online players
+  setInterval(() => {
+    Object.keys(players).forEach(uid => {
+      if (players[uid].onlineStatus) {
+        savePlayer(uid);
+      }
+    });
+  }, 60000); // Every minute
+
   io.on("connection", (socket) => {
     let currentUid: string | null = null;
 
-    socket.on("join", (data: { uid: string, displayName: string, photoURL: string, lat: number, lng: number }) => {
+    socket.on("join", async (data: { uid: string, displayName: string, photoURL: string, lat: number, lng: number }) => {
       const { uid, displayName, photoURL, lat, lng } = data;
       currentUid = uid;
       socket.join(uid);
 
       if (!players[uid]) {
-        players[uid] = {
-          uid,
-          displayName,
-          photoURL,
-          lat,
-          lng,
-          health: 10000,
-          ammo: 100,
-          grenades: 5,
-          missiles: 2,
-          coins: 1000,
-          kills: 0,
-          deaths: 0,
-          territoryCount: 0,
-          squadId: "general",
-          onlineStatus: true,
-          lastActive: Date.now(),
-          lastMissileTime: 0,
-          hasAssaultRifle: false
-        };
+        // Try to load from Firestore first (in case it wasn't in initial load)
+        try {
+          const userDoc = await db.collection("users").doc(uid).get();
+          if (userDoc.exists) {
+            players[uid] = userDoc.data() as Player;
+            players[uid].onlineStatus = true;
+            players[uid].lastActive = Date.now();
+            players[uid].lat = lat;
+            players[uid].lng = lng;
+          } else {
+            players[uid] = {
+              uid,
+              displayName,
+              photoURL,
+              lat,
+              lng,
+              health: 10000,
+              ammo: 100,
+              grenades: 5,
+              missiles: 2,
+              landmines: 0,
+              coins: 1000,
+              kills: 0,
+              deaths: 0,
+              territoryCount: 0,
+              squadId: "general",
+              onlineStatus: true,
+              lastActive: Date.now(),
+              lastMissileTime: 0,
+              hasAssaultRifle: false
+            };
+            savePlayer(uid);
+          }
+        } catch (e) {
+          handleFirestoreError(e, OperationType.GET, `users/${uid}`);
+        }
       } else {
         players[uid].onlineStatus = true;
         players[uid].lastActive = Date.now();
         players[uid].lat = lat;
         players[uid].lng = lng;
+        savePlayer(uid);
       }
 
       socket.emit("initData", {
@@ -207,10 +388,46 @@ async function startServer() {
         players: Object.values(players).filter(p => p.onlineStatus),
         territories: Object.values(territories),
         treasures: Object.values(treasures).filter(t => t.active),
-        squads: Object.values(squads)
+        squads: Object.values(squads),
+        landmines: Object.values(landmines).filter(m => m.ownerId === uid)
       });
 
       socket.broadcast.emit("playerJoined", players[uid]);
+    });
+
+    socket.on("placeLandmine", (data: { lat: number, lng: number }) => {
+      if (!currentUid || !players[currentUid]) return;
+      const player = players[currentUid];
+      if (player.landmines <= 0) return;
+
+      // Check if inside own territory
+      const inOwnTerritory = Object.values(territories).some(t => {
+        if (t.ownerId !== currentUid) return false;
+        const dist = getDistance(
+          { latitude: t.lat, longitude: t.lng },
+          { latitude: data.lat, longitude: data.lng }
+        );
+        return dist <= t.radius;
+      });
+
+      if (!inOwnTerritory) {
+        socket.emit("error", "You can only place landmines in your own territory!");
+        return;
+      }
+
+      const mineId = `mine_${Date.now()}_${currentUid}`;
+      const newMine = {
+        id: mineId,
+        ownerId: currentUid,
+        lat: data.lat,
+        lng: data.lng,
+        active: true
+      };
+      landmines[mineId] = newMine;
+      player.landmines--;
+      
+      socket.emit("landminePlaced", newMine);
+      socket.emit("statsUpdated", { landmines: player.landmines });
     });
 
     socket.on("move", (data: { lat: number, lng: number }) => {
@@ -219,6 +436,9 @@ async function startServer() {
       p.lat = data.lat;
       p.lng = data.lng;
       p.lastActive = Date.now();
+      
+      // We don't save on every move to avoid hitting Firestore quotas
+      // Instead, we save on disconnect or other major events
       socket.broadcast.emit("playerMoved", { uid: currentUid, lat: p.lat, lng: p.lng });
     });
 
@@ -366,11 +586,19 @@ async function startServer() {
         
         p.coins -= captureCost;
         p.territoryCount++;
+        
+        savePlayer(currentUid);
+        saveTerritory(existingTerritory.id);
+        if (existingTerritory.ownerSquadId && squads[existingTerritory.ownerSquadId]) {
+          saveSquad(existingTerritory.ownerSquadId);
+        }
+        
         io.emit("territoryAdded", existingTerritory); // Re-broadcast updated territory
         socket.emit("statsUpdated", { coins: p.coins, territoryCount: p.territoryCount });
 
         if (p.squadId && squads[p.squadId]) {
           squads[p.squadId].territoryCount++;
+          saveSquad(p.squadId);
           broadcastLeaderboard();
         }
       } else {
@@ -424,6 +652,8 @@ async function startServer() {
       if (dist <= 100) {
         t.active = false;
         p.coins += t.coins;
+        savePlayer(currentUid);
+        saveTreasure(data.id);
         
         // 20% chance for grenade
         if (Math.random() < 0.2) {
@@ -460,14 +690,18 @@ async function startServer() {
         p.grenades += 1;
       } else if (data.type === "missile") {
         p.missiles += 1;
+      } else if (data.type === "landmine") {
+        p.landmines += 1;
       }
 
+      savePlayer(currentUid);
       socket.emit("statsUpdated", { 
         coins: p.coins, 
         health: p.health,
         ammo: p.ammo,
         grenades: p.grenades,
         missiles: p.missiles,
+        landmines: p.landmines,
         hasAssaultRifle: p.hasAssaultRifle
       });
     });
@@ -495,8 +729,6 @@ async function startServer() {
           lng: data.lng + (Math.random() - 0.5) * 0.01,
           health: 10000,
           ammo: 100,
-          grenades: 0,
-          missiles: 0,
           coins: 100,
           kills: 0,
           deaths: 0,
@@ -505,7 +737,10 @@ async function startServer() {
           onlineStatus: true,
           lastActive: Date.now(),
           lastMissileTime: 0,
-          hasAssaultRifle: false
+          hasAssaultRifle: false,
+          landmines: 0,
+          missiles: 0,
+          grenades: 0
         };
         bots.push(botId);
         io.emit("playerJoined", players[botId]);
@@ -536,6 +771,8 @@ async function startServer() {
       
       squads[squadId] = newSquad;
       p.squadId = squadId;
+      savePlayer(currentUid);
+      saveSquad(squadId);
       io.emit("squadAdded", newSquad);
       socket.emit("statsUpdated", { squadId });
       broadcastLeaderboard();
@@ -559,6 +796,12 @@ async function startServer() {
       const playerTerritories = Object.values(territories).filter(t => t.ownerId === currentUid).length;
       squads[data.squadId].territoryCount += playerTerritories;
       
+      savePlayer(currentUid);
+      saveSquad(data.squadId);
+      if (p.squadId && squads[p.squadId]) {
+        saveSquad(p.squadId);
+      }
+      
       socket.emit("statsUpdated", { squadId: data.squadId });
       broadcastLeaderboard();
     });
@@ -569,8 +812,10 @@ async function startServer() {
       if (p.squadId && squads[p.squadId]) {
         const playerTerritories = Object.values(territories).filter(t => t.ownerId === currentUid).length;
         squads[p.squadId].territoryCount -= playerTerritories;
+        saveSquad(p.squadId);
       }
       p.squadId = "";
+      savePlayer(currentUid);
       socket.emit("statsUpdated", { squadId: "" });
       broadcastLeaderboard();
     });
@@ -578,6 +823,7 @@ async function startServer() {
     socket.on("disconnect", () => {
       if (currentUid && players[currentUid]) {
         players[currentUid].onlineStatus = false;
+        savePlayer(currentUid);
         io.emit("playerLeft", { uid: currentUid });
       }
     });
@@ -603,6 +849,7 @@ async function startServer() {
 
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    loadInitialData();
   });
 }
 

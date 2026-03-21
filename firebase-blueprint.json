@@ -6,6 +6,7 @@
       "type": "object",
       "properties": {
         "uid": { "type": "string" },
+        "username": { "type": "string" },
         "displayName": { "type": "string" },
         "photoURL": { "type": "string" },
         "lat": { "type": "number" },
@@ -14,6 +15,8 @@
         "health": { "type": "number" },
         "ammo": { "type": "number" },
         "coins": { "type": "number" },
+        "points": { "type": "number" },
+        "level": { "type": "number" },
         "squadId": { "type": "string" },
         "gunQuality": { "type": "string", "enum": ["cheap", "standard", "expensive", "elite"] },
         "shieldUntil": { "type": "string", "description": "ISO string or Firestore Timestamp." },
@@ -21,9 +24,10 @@
         "autoMissiles": { "type": "number" },
         "grenades": { "type": "number" },
         "territoryCount": { "type": "number" },
-        "onlineStatus": { "type": "boolean" }
+        "onlineStatus": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["uid", "displayName", "health", "ammo", "coins", "gunQuality", "autoMissiles", "grenades", "territoryCount", "onlineStatus"]
+      "required": ["uid", "username", "health", "ammo", "coins", "points", "level", "gunQuality", "autoMissiles", "grenades", "territoryCount", "onlineStatus"]
     },
     "Attack": {
       "title": "Attack",
