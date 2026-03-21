@@ -1,9 +1,9 @@
-{
-  "apiKey": "YOUR_API_KEY",
-  "authDomain": "studio-3860950835-47901.firebaseapp.com",
-  "projectId": "studio-3860950835-47901",
-  "storageBucket": "studio-3860950835-47901.appspot.com",
-  "messagingSenderId": "326892559750",
-  "appId": "YOUR_APP_ID",
-  "databaseURL": "https://studio-3860950835-47901-default-rtdb.firebaseio.com"
-}
+const firebaseConfig = {
+  apiKey: "AIzaSyBP3agQnwfoW3sqbByqt9ubEMIhHWDtijU",
+  authDomain: "studio-3860950835-47901.firebaseapp.com",
+  projectId: "studio-3860950835-47901",
+  storageBucket: "studio-3860950835-47901.firebasestorage.app",
+  messagingSenderId: "326892559750",
+  appId: "1:326892559750:web:889b19a7ce0b52730e6007"
+  databaseURL: "https://studio-3860950835-47901-default-rtdb.firebaseio.com"
+};
