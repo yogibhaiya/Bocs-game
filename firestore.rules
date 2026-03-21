@@ -21,10 +21,10 @@ service cloud.firestore {
     // ===============================================================
     function isValidUser(data) {
       return data.uid is string &&
-             data.username is string && data.username.size() >= 3 && data.username.size() <= 50 &&
-             data.territories is number && data.territories >= 0 &&
-             data.points is number && data.points >= 0 &&
-             data.level is number && data.level >= 1 &&
+             data.username is string && data.username.size() >= 1 && data.username.size() <= 100 &&
+             data.territories is number &&
+             data.points is number &&
+             data.level is number &&
              data.isAnonymous is bool;
     }
 
@@ -33,21 +33,15 @@ service cloud.firestore {
     // ===============================================================
     
     match /users/{userId} {
-      // Users can read their own profile, or others can read basic info (if needed)
-      // For now, let's keep it restricted to authenticated users for discovery
       allow read: if isAuthenticated();
       
-      // Only the owner can create their document, and it must be valid
       allow create: if isOwner(userId) && isValidUser(request.resource.data);
       
-      // Only the owner can update their document
-      // We also ensure critical fields like uid and createdAt don't change
       allow update: if isOwner(userId) && 
                     isValidUser(request.resource.data) &&
-                    request.resource.data.uid == resource.data.uid &&
-                    request.resource.data.createdAt == resource.data.createdAt;
+                    request.resource.data.uid == resource.data.uid;
                     
-      allow delete: if false; // Users cannot delete their accounts via client
+      allow delete: if false;
     }
 
     // Default deny for everything else

@@ -16,19 +16,70 @@ import {
   getDoc,
   setDoc,
   serverTimestamp,
-  Timestamp
+  Timestamp,
+  getDocFromServer
 } from 'firebase/firestore';
 
-const firebaseConfig = {
-  apiKey: "AIzaSyBp3agQnwfoW3sqbByqt9ubEMIHwDtiJUs",
-  authDomain: "studio-3860950835-47901.firebaseapp.com",
-  projectId: "studio-3860950835-47901",
-  storageBucket: "studio-3860950835-47901.firebasestorage.app",
-  messagingSenderId: "326892559750",
-  appId: "1:326892559750:web:889b19a7ce0b52730e6007",
-  databaseURL: "https://studio-3860950835-47901-default-rtdb.firebaseio.com"
-};
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
 
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyBP3agQnwfoW3sqbByqt9ubEMIhHWDtijU",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "studio-3860950835-47901.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "studio-3860950835-47901",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "studio-3860950835-47901.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "326892559750",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:326892559750:web:889b19a7ce0b52730e6007",
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || "https://studio-3860950835-47901-default-rtdb.asia-southeast1.firebasedatabase.app"
+};
 // 🔥 Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
@@ -55,9 +106,14 @@ export interface GameUser {
 
 export const createUserData = async (user: User) => {
   const userRef = doc(db, 'users', user.uid);
-  const userSnap = await getDoc(userRef);
+  let userSnap;
+  try {
+    userSnap = await getDoc(userRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+  }
 
-  if (!userSnap.exists()) {
+  if (!userSnap?.exists()) {
     const randomId = Math.floor(1000 + Math.random() * 9000);
 
     const userData: GameUser = {
@@ -71,7 +127,11 @@ export const createUserData = async (user: User) => {
       isAnonymous: user.isAnonymous
     };
 
-    await setDoc(userRef, userData);
+    try {
+      await setDoc(userRef, userData);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}`);
+    }
     return userData;
   }
 
@@ -80,10 +140,13 @@ export const createUserData = async (user: User) => {
 
 export const getUserData = async (uid: string): Promise<GameUser | null> => {
   const userRef = doc(db, 'users', uid);
-  const userSnap = await getDoc(userRef);
-
-  if (userSnap.exists()) {
-    return userSnap.data() as GameUser;
+  try {
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) {
+      return userSnap.data() as GameUser;
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `users/${uid}`);
   }
 
   return null;
@@ -114,18 +177,22 @@ export const loginWithGoogle = async () => {
 
       const userRef = doc(db, 'users', credential.user.uid);
 
-      await setDoc(
-        userRef,
-        {
-          email: credential.user.email,
-          isAnonymous: false,
-          ...(credential.user.displayName &&
-          !auth.currentUser.displayName
-            ? { username: credential.user.displayName }
-            : {})
-        },
-        { merge: true }
-      );
+      try {
+        await setDoc(
+          userRef,
+          {
+            email: credential.user.email,
+            isAnonymous: false,
+            ...(credential.user.displayName &&
+            !auth.currentUser.displayName
+              ? { username: credential.user.displayName }
+              : {})
+          },
+          { merge: true }
+        );
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `users/${credential.user.uid}`);
+      }
 
       return await getUserData(credential.user.uid);
     } else {
