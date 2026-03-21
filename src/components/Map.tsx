@@ -11,6 +11,7 @@ interface MapProps {
   onMapClick: (lat: number, lng: number) => void;
   onCollectTreasure: (treasure: Treasure) => void;
   onAttackPlayer: (targetId: string) => void;
+  onTargetChange: (lat: number, lng: number) => void;
 }
 
 export default function GameMap({ 
@@ -21,10 +22,12 @@ export default function GameMap({
   attacks, 
   onMapClick, 
   onCollectTreasure, 
-  onAttackPlayer 
+  onAttackPlayer,
+  onTargetChange
 }: MapProps) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstance = useRef<google.maps.Map | null>(null);
+  const crosshairRef = useRef<google.maps.Marker | null>(null);
   const markerClasses = useRef<{
     AdvancedMarkerElement: typeof google.maps.marker.AdvancedMarkerElement;
     PinElement: typeof google.maps.marker.PinElement;
@@ -66,6 +69,31 @@ export default function GameMap({
 
           mapInstance.current.addListener("click", (e: any) => {
             onMapClick(e.latLng.lat(), e.latLng.lng());
+            onTargetChange(e.latLng.lat(), e.latLng.lng());
+            if (crosshairRef.current) {
+              crosshairRef.current.setPosition(e.latLng);
+            }
+          });
+
+          mapInstance.current.addListener("mousemove", (e: any) => {
+            onTargetChange(e.latLng.lat(), e.latLng.lng());
+            if (crosshairRef.current) {
+              crosshairRef.current.setPosition(e.latLng);
+            }
+          });
+
+          // Create crosshair marker
+          crosshairRef.current = new google.maps.Marker({
+            position: currentUser ? { lat: currentUser.lat, lng: currentUser.lng } : { lat: 22.57, lng: 88.36 },
+            map: mapInstance.current,
+            icon: {
+              path: "M -10,0 10,0 M 0,-10 0,10",
+              strokeColor: "#00FFFF",
+              strokeWeight: 2,
+              scale: 1
+            },
+            clickable: false,
+            zIndex: 9999
           });
 
           setIsMapLoaded(true);
@@ -115,10 +143,25 @@ export default function GameMap({
         label.style.fontWeight = 'bold';
         label.style.color = 'white';
         label.style.textShadow = '1px 1px 2px black';
-        label.innerText = player.displayName;
+        // Only show label if it's not a URL
+        const isUrl = (str: string) => str.startsWith('http://') || str.startsWith('https://');
+        label.innerText = isUrl(player.displayName) ? '' : player.displayName;
+
+        let glyphElement: string | Element = '👤';
+        if (player.photoURL && isUrl(player.photoURL)) {
+          const img = document.createElement('img');
+          img.src = player.photoURL;
+          img.style.width = '20px';
+          img.style.height = '20px';
+          img.style.borderRadius = '50%';
+          img.referrerPolicy = 'no-referrer';
+          glyphElement = img;
+        } else if (player.photoURL) {
+          glyphElement = player.photoURL;
+        }
 
         const pin = new PinElement({
-          glyph: player.photoURL || '👤',
+          glyph: glyphElement,
           background: isMe ? '#4ade80' : (isBot ? '#f87171' : '#60a5fa'),
           borderColor: 'white',
         });

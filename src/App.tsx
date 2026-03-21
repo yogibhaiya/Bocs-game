@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { auth, loginWithGoogle } from './firebase';
 import { useGameData } from './hooks/useGameData';
 import GameMap from './components/Map';
@@ -48,6 +48,12 @@ export default function App() {
   const [fireTrigger, setFireTrigger] = useState(0);
   const [missileTrigger, setMissileTrigger] = useState(0);
   const [grenadeTrigger, setGrenadeTrigger] = useState(0);
+  const [targetLatLng, setTargetLatLng] = useState<{ latitude: number, longitude: number } | null>(null);
+  const currentUserRef = useRef(currentUser);
+
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
 
   useEffect(() => {
     const unsub = auth.onAuthStateChanged((user) => {
@@ -57,8 +63,21 @@ export default function App() {
     });
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && activeTab === 'map') {
+      if (e.code === 'Space' && activeTab === 'map' && !e.repeat) {
         e.preventDefault();
+        if (currentUserRef.current?.hasAssaultRifle) {
+          // Rapid fire on space hold
+          const interval = setInterval(() => {
+            setFireTrigger(prev => prev + 1);
+          }, 150);
+          const handleKeyUp = (upEvent: KeyboardEvent) => {
+            if (upEvent.code === 'Space') {
+              clearInterval(interval);
+              window.removeEventListener('keyup', handleKeyUp);
+            }
+          };
+          window.addEventListener('keyup', handleKeyUp);
+        }
         setFireTrigger(prev => prev + 1);
       }
     };
@@ -71,11 +90,11 @@ export default function App() {
   }, [activeTab]);
 
   useEffect(() => {
-    if (fireTrigger > 0) fireWeapon(null, false);
+    if (fireTrigger > 0) fireWeapon(targetLatLng, false, currentUserRef.current?.hasAssaultRifle);
   }, [fireTrigger]);
 
   useEffect(() => {
-    if (missileTrigger > 0) fireWeapon(null, true);
+    if (missileTrigger > 0) fireWeapon(targetLatLng, true);
   }, [missileTrigger]);
 
   useEffect(() => {
@@ -194,7 +213,7 @@ export default function App() {
       <HUD 
         user={currentUser} 
         territories={territories}
-        onFire={() => setFireTrigger(p => p + 1)}
+        onFire={(isAssault) => setFireTrigger(p => p + 1)}
         onFireMissile={() => setMissileTrigger(p => p + 1)}
         onThrowGrenade={() => setGrenadeTrigger(p => p + 1)}
         onPurchaseTerritory={purchaseTerritory}
@@ -210,6 +229,7 @@ export default function App() {
         onMapClick={moveTo}
         onCollectTreasure={collectTreasure}
         onAttackPlayer={attackPlayer}
+        onTargetChange={(lat, lng) => setTargetLatLng({ latitude: lat, longitude: lng })}
       />
 
       {/* MODALS */}

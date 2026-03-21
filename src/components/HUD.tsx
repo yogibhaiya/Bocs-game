@@ -6,7 +6,7 @@ import { isPointWithinRadius } from 'geolib';
 interface HUDProps {
   user: User;
   territories: Territory[];
-  onFire: () => void;
+  onFire: (isAssault?: boolean) => void;
   onFireMissile: () => void;
   onThrowGrenade: () => void;
   onPurchaseTerritory: () => void;
@@ -15,6 +15,33 @@ interface HUDProps {
 export default function HUD({ user, territories, onFire, onFireMissile, onThrowGrenade, onPurchaseTerritory }: HUDProps) {
   const [isShaking, setIsShaking] = useState(false);
   const lastHealth = useRef(user.health);
+  const fireInterval = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (fireInterval.current) clearInterval(fireInterval.current);
+    };
+  }, []);
+
+  const startFiring = () => {
+    if (user.ammo <= 0 || user.health <= 0) return;
+    
+    // Initial shot
+    onFire(user.hasAssaultRifle);
+
+    if (user.hasAssaultRifle) {
+      fireInterval.current = setInterval(() => {
+        onFire(true);
+      }, 150); // Fire rate for assault rifle
+    }
+  };
+
+  const stopFiring = () => {
+    if (fireInterval.current) {
+      clearInterval(fireInterval.current);
+      fireInterval.current = null;
+    }
+  };
 
   useEffect(() => {
     if (user.health < lastHealth.current) {
@@ -39,35 +66,35 @@ export default function HUD({ user, territories, onFire, onFireMissile, onThrowG
   return (
     <div className={`fixed top-0 left-0 w-full h-full p-4 pt-[max(1rem,env(safe-area-inset-top))] pointer-events-none z-[9999] flex flex-col justify-between transition-transform duration-75 ${isShaking ? 'translate-x-1 translate-y-1' : ''}`}>
       <div className="flex justify-between items-start w-full">
-        <div className="flex flex-col gap-3 pointer-events-auto">
+        <div className="flex flex-col gap-2 pointer-events-auto">
           {/* Health */}
-          <div className="flex items-center gap-2 bg-zinc-950/80 backdrop-blur-md px-3 sm:px-4 py-2 rounded-2xl border border-zinc-800/50 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
-            <Heart className="w-5 h-5 text-red-500 shrink-0 drop-shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
-            <div className="w-20 sm:w-32 h-2.5 bg-zinc-900 rounded-full overflow-hidden shadow-inner">
+          <div className="flex items-center gap-2 bg-zinc-950/80 backdrop-blur-md px-2 py-1 rounded-xl border border-zinc-800/50 shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+            <Heart className="w-4 h-4 text-red-500 shrink-0 drop-shadow-[0_0_5px_rgba(239,68,68,0.8)]" />
+            <div className="w-16 sm:w-24 h-1.5 bg-zinc-900 rounded-full overflow-hidden shadow-inner">
               <div 
-                className="h-full bg-gradient-to-r from-red-600 to-red-400 transition-all duration-300 shadow-[0_0_10px_rgba(239,68,68,0.8)]" 
+                className="h-full bg-gradient-to-r from-red-600 to-red-400 transition-all duration-300 shadow-[0_0_8px_rgba(239,68,68,0.8)]" 
                 style={{ width: `${Math.max(0, Math.min(100, (user.health / 10000) * 100))}%` }}
               />
             </div>
-            <span className="text-sm font-bold font-mono text-zinc-100 drop-shadow-md">{user.health}</span>
+            <span className="text-xs font-bold font-mono text-zinc-100 drop-shadow-md">{user.health}</span>
           </div>
 
           {/* Territories */}
-          <div className="flex items-center gap-3 bg-zinc-950/80 backdrop-blur-md px-3 sm:px-4 py-2 rounded-2xl border border-zinc-800/50 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
-            <MapIcon className="w-5 h-5 text-emerald-500 shrink-0 drop-shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-            <span className="text-sm sm:text-base font-bold font-mono text-zinc-100 drop-shadow-md">{user.territoryCount || 0} Territories</span>
+          <div className="flex items-center gap-2 bg-zinc-950/80 backdrop-blur-md px-2 py-1 rounded-xl border border-zinc-800/50 shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+            <MapIcon className="w-4 h-4 text-emerald-500 shrink-0 drop-shadow-[0_0_5px_rgba(16,185,129,0.8)]" />
+            <span className="text-xs font-bold font-mono text-zinc-100 drop-shadow-md">{user.territoryCount || 0} T</span>
           </div>
 
           {/* Ammo */}
-          <div className="flex items-center gap-3 bg-zinc-950/80 backdrop-blur-md px-3 sm:px-4 py-2 rounded-2xl border border-zinc-800/50 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
-            <Crosshair className="w-5 h-5 text-blue-500 shrink-0 drop-shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
-            <span className="text-sm sm:text-base font-bold font-mono text-zinc-100 drop-shadow-md">{user.ammo}</span>
+          <div className="flex items-center gap-2 bg-zinc-950/80 backdrop-blur-md px-2 py-1 rounded-xl border border-zinc-800/50 shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+            <Crosshair className="w-4 h-4 text-blue-500 shrink-0 drop-shadow-[0_0_5px_rgba(59,130,246,0.8)]" />
+            <span className="text-xs font-bold font-mono text-zinc-100 drop-shadow-md">{user.ammo}</span>
           </div>
 
           {/* Coins */}
-          <div className="flex items-center gap-3 bg-zinc-950/80 backdrop-blur-md px-3 sm:px-4 py-2 rounded-2xl border border-zinc-800/50 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
-            <Coins className="w-5 h-5 text-yellow-500 shrink-0 drop-shadow-[0_0_8px_rgba(234,179,8,0.8)]" />
-            <span className="text-sm sm:text-base font-bold font-mono text-zinc-100 drop-shadow-md">{user.coins} BC</span>
+          <div className="flex items-center gap-2 bg-zinc-950/80 backdrop-blur-md px-2 py-1 rounded-xl border border-zinc-800/50 shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+            <Coins className="w-4 h-4 text-yellow-500 shrink-0 drop-shadow-[0_0_5px_rgba(234,179,8,0.8)]" />
+            <span className="text-xs font-bold font-mono text-zinc-100 drop-shadow-md">{user.coins} BC</span>
           </div>
         </div>
 
@@ -126,20 +153,42 @@ export default function HUD({ user, territories, onFire, onFireMissile, onThrowG
           </div>
         )}
 
-        {/* Standard Weapon */}
+        {/* Standard/Assault Weapon */}
         <div className="flex flex-col items-center gap-2">
           <button
-            onClick={(e) => {
+            onMouseDown={(e) => {
               e.stopPropagation();
-              onFire();
+              startFiring();
+            }}
+            onMouseUp={(e) => {
+              e.stopPropagation();
+              stopFiring();
+            }}
+            onMouseLeave={(e) => {
+              e.stopPropagation();
+              stopFiring();
+            }}
+            onTouchStart={(e) => {
+              e.stopPropagation();
+              startFiring();
+            }}
+            onTouchEnd={(e) => {
+              e.stopPropagation();
+              stopFiring();
             }}
             disabled={user.ammo <= 0 || user.health <= 0}
-            className="pointer-events-auto group relative flex items-center justify-center w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-red-600 border-4 border-red-900 shadow-[0_0_30px_rgba(220,38,38,0.5)] active:scale-95 active:bg-red-700 transition-all disabled:opacity-50 disabled:grayscale disabled:scale-100"
+            className={`pointer-events-auto group relative flex items-center justify-center w-20 h-20 sm:w-24 sm:h-24 rounded-full border-4 shadow-[0_0_30px_rgba(220,38,38,0.5)] active:scale-95 transition-all disabled:opacity-50 disabled:grayscale disabled:scale-100 ${
+              user.hasAssaultRifle ? 'bg-orange-600 border-orange-900' : 'bg-red-600 border-red-900'
+            }`}
           >
-            <div className="absolute inset-0 rounded-full bg-red-500 animate-ping opacity-20 group-hover:opacity-40" />
+            <div className={`absolute inset-0 rounded-full animate-ping opacity-20 group-hover:opacity-40 ${
+              user.hasAssaultRifle ? 'bg-orange-500' : 'bg-red-500'
+            }`} />
             <Crosshair className="w-10 h-10 sm:w-12 h-12 text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
           </button>
-          <span className="text-red-500 font-black text-[10px] tracking-widest uppercase drop-shadow-[0_0_5px_rgba(239,68,68,0.5)]">Weapon</span>
+          <span className={`${user.hasAssaultRifle ? 'text-orange-500' : 'text-red-500'} font-black text-[10px] tracking-widest uppercase drop-shadow-[0_0_5px_rgba(239,68,68,0.5)]`}>
+            {user.hasAssaultRifle ? 'Assault Rifle' : 'Weapon'}
+          </span>
         </div>
 
         {/* Missile Button (Only if user has missiles) */}

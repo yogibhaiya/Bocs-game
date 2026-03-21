@@ -271,7 +271,7 @@ export const useGameData = (gameStarted: boolean) => {
     socket.emit('move', { lat, lng });
   };
 
-  const fireWeapon = (targetLatLng: { latitude: number, longitude: number } | null, useMissile: boolean = false) => {
+  const fireWeapon = (targetLatLng: { latitude: number, longitude: number } | null, useMissile: boolean = false, isAssault: boolean = false) => {
     if (!currentUser || currentUser.health <= 0) return;
     
     if (useMissile) {
@@ -293,7 +293,7 @@ export const useGameData = (gameStarted: boolean) => {
       }
 
       if (targetId) {
-        socket.emit('attackGun', { targetId });
+        socket.emit('attackGun', { targetId, isAssault: isAssault || currentUser.hasAssaultRifle });
       } else {
         // Visual effect for miss
         if (targetLatLng) {

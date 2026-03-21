@@ -19,6 +19,7 @@ interface Player {
   coins: number;
   kills: number;
   deaths: number;
+  territoryCount: number;
   squadId: string;
   onlineStatus: boolean;
   lastActive: number;
@@ -187,6 +188,7 @@ async function startServer() {
           coins: 1000,
           kills: 0,
           deaths: 0,
+          territoryCount: 0,
           squadId: "general",
           onlineStatus: true,
           lastActive: Date.now(),
@@ -238,11 +240,16 @@ async function startServer() {
         attacker.ammo -= weapon.ammoCost;
         let damage = weapon.damage;
 
-        // Territory boost
-        const inOwnTerritory = Object.values(territories).some(t => 
+        // Territory rules
+        const attackerInOwnTerritory = Object.values(territories).some(t => 
           t.ownerId === currentUid && isPointWithinRadius({ latitude: attacker.lat, longitude: attacker.lng }, { latitude: t.lat, longitude: t.lng }, t.radius)
         );
-        if (inOwnTerritory) damage *= 2;
+        const targetInOwnTerritory = Object.values(territories).some(t => 
+          t.ownerId === target.uid && isPointWithinRadius({ latitude: target.lat, longitude: target.lng }, { latitude: t.lat, longitude: t.lng }, t.radius)
+        );
+
+        if (attackerInOwnTerritory) damage *= 2;
+        if (targetInOwnTerritory) damage /= 2;
 
         target.health -= damage;
         io.emit("playerHit", { targetId: target.uid, attackerId: currentUid, damage, weapon: data.isAssault ? "assault" : "gun", newHealth: target.health });
@@ -358,8 +365,9 @@ async function startServer() {
         existingTerritory.lastIncomeTime = Date.now();
         
         p.coins -= captureCost;
+        p.territoryCount++;
         io.emit("territoryAdded", existingTerritory); // Re-broadcast updated territory
-        socket.emit("statsUpdated", { coins: p.coins });
+        socket.emit("statsUpdated", { coins: p.coins, territoryCount: p.territoryCount });
 
         if (p.squadId && squads[p.squadId]) {
           squads[p.squadId].territoryCount++;
@@ -390,8 +398,9 @@ async function startServer() {
         territories[id] = territory;
 
         p.coins -= purchaseCost;
+        p.territoryCount++;
         io.emit("territoryAdded", territories[id]);
-        socket.emit("statsUpdated", { coins: p.coins });
+        socket.emit("statsUpdated", { coins: p.coins, territoryCount: p.territoryCount });
 
         if (p.squadId && squads[p.squadId]) {
           squads[p.squadId].territoryCount++;
@@ -491,6 +500,7 @@ async function startServer() {
           coins: 100,
           kills: 0,
           deaths: 0,
+          territoryCount: 0,
           squadId: "bots",
           onlineStatus: true,
           lastActive: Date.now(),
