@@ -19,7 +19,15 @@ import {
   Timestamp
 } from 'firebase/firestore';
 
-import firebaseConfig from '../firebase-applet-config.json';
+const firebaseConfig = {
+  apiKey: "AIzaSyBp3agQnwfoW3sqbByqt9ubEMIHwDtiJUs",
+  authDomain: "studio-3860950835-47901.firebaseapp.com",
+  projectId: "studio-3860950835-47901",
+  storageBucket: "studio-3860950835-47901.firebasestorage.app",
+  messagingSenderId: "326892559750",
+  appId: "1:326892559750:web:889b19a7ce0b52730e6007",
+  databaseURL: "https://studio-3860950835-47901-default-rtdb.firebaseio.com"
+};
 
 // 🔥 Initialize Firebase
 const app = initializeApp(firebaseConfig);
