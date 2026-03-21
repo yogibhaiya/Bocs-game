@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { auth, loginWithGoogle, logout } from './firebase';
-import firebaseConfig from '../firebase-applet-config.json';
+import { auth, loginWithGoogle } from './firebase';
 import { useGameData } from './hooks/useGameData';
 import GameMap from './components/Map';
 import HUD from './components/HUD';
@@ -9,39 +8,50 @@ import Squad from './components/Squad';
 import Leaderboard from './components/Leaderboard';
 import Profile from './components/Profile';
 import Territories from './components/Territories';
-import { ShoppingCart, Users, Trophy, LogOut, Map as MapIcon, UserCircle, Flag } from 'lucide-react';
+import { ShoppingCart, Users, Trophy, Map as MapIcon, UserCircle, Flag } from 'lucide-react';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [showFailSafe, setShowFailSafe] = useState(false);
+
   const [activeTab, setActiveTab] = useState<'map' | 'shop' | 'squad' | 'leaderboard' | 'profile' | 'territories'>('map');
-  const [authError, setAuthError] = useState<string | null>(null);
-  
-  const { 
-    currentUser, 
-    players, 
-    squads, 
-    treasures, 
-    territories, 
-    attacks, 
-    fireWeapon, 
-    throwGrenade, 
-    collectTreasure, 
-    buyItem, 
-    purchaseTerritory, 
-    spawnBots, 
-    spawnTenBots, 
-    spawnTestEntities, 
+
+  const {
+    currentUser,
+    players,
+    squads,
+    treasures,
+    territories,
+    attacks,
+    leaderboard,
+    fireWeapon,
+    throwGrenade,
+    collectTreasure,
+    buyItem,
+    purchaseTerritory,
+    updateAvatar,
+    isQuotaExceeded,
+    attackPlayer,
+    notification,
+    moveTo,
+    createSquad,
+    joinSquad,
+    leaveSquad,
+    spawnBots,
+    spawnTenBots,
+    spawnTestEntities,
     addTestCoins,
-    isQuotaExceeded
-  } = useGameData();
+    enterFailSafeMode
+  } = useGameData(true);
+
   const [fireTrigger, setFireTrigger] = useState(0);
   const [missileTrigger, setMissileTrigger] = useState(0);
   const [grenadeTrigger, setGrenadeTrigger] = useState(0);
-  const [targetId, setTargetId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = auth.onAuthStateChanged((user) => {
+      console.log("Auth state changed:", !!user);
       setIsAuthenticated(!!user);
       setIsAuthLoading(false);
     });
@@ -49,7 +59,7 @@ export default function App() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && activeTab === 'map') {
         e.preventDefault();
-        handleFire();
+        setFireTrigger(prev => prev + 1);
       }
     };
 
@@ -60,211 +70,175 @@ export default function App() {
     };
   }, [activeTab]);
 
-  const [loginSuccess, setLoginSuccess] = useState<string | null>(null);
+  useEffect(() => {
+    if (fireTrigger > 0) fireWeapon(null, false);
+  }, [fireTrigger]);
+
+  useEffect(() => {
+    if (missileTrigger > 0) fireWeapon(null, true);
+  }, [missileTrigger]);
+
+  useEffect(() => {
+    if (grenadeTrigger > 0) {
+      // For grenade we need a target, but HUD call might not have one.
+      // In a real game, this might throw at current location or crosshair.
+      // For now, let's just trigger it at current player location if no target.
+      if (currentUser) throwGrenade(currentUser.lat, currentUser.lng);
+    }
+  }, [grenadeTrigger]);
+
+  useEffect(() => {
+    if (isAuthenticated && !currentUser) {
+      const timer = setTimeout(() => setShowFailSafe(true), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [isAuthenticated, currentUser]);
 
   const handleLogin = async () => {
-    setAuthError(null);
-    setLoginSuccess(null);
+    console.log("Login initiated");
     try {
-      const user = await loginWithGoogle();
-      setLoginSuccess(`Successfully signed in as ${user.displayName}`);
-      // The onAuthStateChanged listener will handle setting isAuthenticated
-    } catch (error: any) {
-      setAuthError(error.message || "An unknown error occurred during sign in.");
+      await loginWithGoogle();
+      console.log("Login successful");
+    } catch (e) {
+      console.error("Login error:", e);
     }
   };
 
-  const handleFire = () => {
-    setFireTrigger(prev => prev + 1);
-  };
-
-  const handleFireMissile = () => {
-    setMissileTrigger(prev => prev + 1);
-  };
-  
-  const handleThrowGrenade = () => {
-    setGrenadeTrigger(prev => prev + 1);
-  };
-
+  // 🔥 AUTH LOADING
   if (isAuthLoading) {
     return (
-      <div className="min-h-[100dvh] bg-zinc-950 flex items-center justify-center">
-        <div className="animate-spin w-8 h-8 border-4 border-cyan-500 border-t-transparent rounded-full"></div>
+      <div className="min-h-[100dvh] bg-black flex items-center justify-center text-white">
+        Loading...
       </div>
     );
   }
 
+  // 🔥 LOGIN SCREEN
   if (!isAuthenticated) {
     return (
-      <div className="min-h-[100dvh] bg-zinc-950 flex flex-col items-center justify-center p-4">
-        <div className="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-2xl p-6 sm:p-8 text-center shadow-2xl">
-          <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-emerald-400 mb-2 tracking-tighter">BOCS</h1>
-          <p className="text-zinc-400 mb-8 font-mono text-sm uppercase tracking-widest">Real-World Tactical Combat</p>
-          
-          <div className="space-y-4 mb-8 text-left">
-            <div className="flex items-center gap-3 text-zinc-300">
-              <div className="w-8 h-8 rounded bg-zinc-800 flex items-center justify-center text-cyan-400">📍</div>
-              <p className="text-sm">Move in the real world to play</p>
-            </div>
-            <div className="flex items-center gap-3 text-zinc-300">
-              <div className="w-8 h-8 rounded bg-zinc-800 flex items-center justify-center text-emerald-400">👥</div>
-              <p className="text-sm">Form squads and conquer territories</p>
-            </div>
-            <div className="flex items-center gap-3 text-zinc-300">
-              <div className="w-8 h-8 rounded bg-zinc-800 flex items-center justify-center text-yellow-400">💰</div>
-              <p className="text-sm">Earn Box Coins for real rewards</p>
-            </div>
+      <div className="min-h-[100dvh] bg-black flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-2xl p-8 text-center shadow-2xl">
+          <h1 className="text-6xl font-black text-cyan-400 mb-2 tracking-tighter">BOCS</h1>
+          <p className="text-zinc-500 font-mono text-xs uppercase tracking-[0.2em] mb-12">Tactical Combat</p>
+
+          <div className="space-y-4">
+            <p className="text-zinc-400 text-sm mb-4">Sign in to join the battlefield</p>
+            <button 
+              onClick={handleLogin} 
+              className="w-full py-4 bg-white text-black rounded-xl font-bold hover:bg-zinc-200 transition-all active:scale-95"
+            >
+              Sign in with Google
+            </button>
           </div>
-
-          {authError && (
-            <div className="mb-6 p-4 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 text-sm text-left">
-              <p className="font-bold mb-1">Authentication Error</p>
-              <p className="break-words">{authError}</p>
-              
-              {authError.includes('unauthorized-domain') && (
-                <div className="mt-4 space-y-3 text-xs text-red-300">
-                  <p className="font-bold text-red-400">Action Required: Add Authorized Domains</p>
-                  <p>This domain is not authorized for Firebase Authentication. Please follow these steps:</p>
-                  <ol className="list-decimal ml-4 space-y-1">
-                    <li>Go to the <a href={`https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`} target="_blank" rel="noopener noreferrer" className="underline text-cyan-400">Firebase Console</a>.</li>
-                    <li>Go to <strong>Authentication</strong> &gt; <strong>Settings</strong> &gt; <strong>Authorized domains</strong>.</li>
-                    <li>Click <strong>Add domain</strong> and add these URLs:
-                      <ul className="mt-1 list-disc ml-4 font-mono text-[10px] bg-black/30 p-1 rounded">
-                        <li>cs-game.vercel.app</li>
-                        <li>ais-dev-7khmsaa3trxujwtz2bffu3-729554691002.asia-southeast1.run.app</li>
-                        <li>ais-pre-7khmsaa3trxujwtz2bffu3-729554691002.asia-southeast1.run.app</li>
-                      </ul>
-                    </li>
-                  </ol>
-                </div>
-              )}
-
-              {authError.includes('configuration-not-found') && (
-                <p className="mt-2 text-xs text-red-300">
-                  Please go to your Firebase Console &gt; Authentication &gt; Sign-in method, and enable the Google provider.
-                </p>
-              )}
-            </div>
-          )}
-
-          {loginSuccess && (
-            <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/50 rounded-lg text-emerald-400 text-sm text-left">
-              <p className="font-bold mb-1">Success</p>
-              <p>{loginSuccess}</p>
-            </div>
-          )}
-
-          <button 
-            onClick={handleLogin}
-            className="w-full py-4 bg-white text-black rounded-xl font-bold text-lg hover:bg-gray-200 transition-colors flex items-center justify-center gap-3"
-          >
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6" />
-            Sign in with Google
-          </button>
         </div>
       </div>
     );
   }
 
+  // 🔥 LOADING PLAYER FIX
   if (!currentUser) {
     return (
-      <div className="min-h-[100dvh] bg-zinc-950 flex items-center justify-center">
-        <div className="animate-spin w-8 h-8 border-4 border-cyan-500 border-t-transparent rounded-full"></div>
+      <div className="min-h-[100dvh] bg-black flex flex-col items-center justify-center text-white p-6">
+        <div className="relative">
+          <div className="animate-spin w-16 h-16 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full"></div>
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-2 h-2 bg-cyan-500 rounded-full animate-ping"></div>
+          </div>
+        </div>
+        <h2 className="mt-8 font-black text-2xl tracking-tighter">SYNCHRONIZING</h2>
+        <p className="text-zinc-500 text-sm mt-2 font-mono uppercase tracking-widest">Fetching player profile...</p>
+        
+        {showFailSafe && (
+          <div className="mt-8 p-4 bg-zinc-900 border border-zinc-800 rounded-xl text-center max-w-xs">
+            <p className="text-xs text-zinc-400 mb-4">Connection taking longer than expected.</p>
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={() => window.location.reload()}
+                className="w-full py-2 bg-zinc-800 text-white text-xs font-bold rounded-lg uppercase tracking-widest hover:bg-zinc-700"
+              >
+                Force Reload
+              </button>
+              <button 
+                onClick={enterFailSafeMode}
+                className="w-full py-2 bg-cyan-500/20 text-cyan-400 text-xs font-bold rounded-lg uppercase tracking-widest border border-cyan-500/30 hover:bg-cyan-500/30"
+              >
+                Enter Game Anyway
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-[100dvh] w-full bg-zinc-950 overflow-hidden font-sans">
+    <div className="flex flex-col h-[100dvh] bg-black text-white relative overflow-hidden">
       {isQuotaExceeded && (
-        <div className="bg-red-600 text-white text-[10px] sm:text-xs font-bold py-1 px-4 text-center animate-pulse z-[2000]">
-          ⚠️ FIRESTORE QUOTA EXCEEDED - BACKGROUND UPDATES PAUSED. RESUMING AT MIDNIGHT.
+        <div className="absolute top-0 left-0 w-full bg-red-600 text-white text-[10px] font-bold py-1 px-4 text-center z-[5000] animate-pulse">
+          ⚠️ FIRESTORE QUOTA EXCEEDED - OFFLINE MODE ACTIVE
         </div>
       )}
-      {/* Main Content Area */}
-      <div className="flex-1 relative min-h-0">
-        <HUD 
-          user={currentUser} 
-          onFire={handleFire} 
-          onFireMissile={handleFireMissile} 
-          onThrowGrenade={handleThrowGrenade}
-        />
-        <GameMap 
-          currentUser={currentUser} 
-          players={players} 
-          squads={squads}
-          treasures={treasures} 
-          territories={territories}
-          attacks={attacks}
-          onAttack={fireWeapon}
-          onThrowGrenade={throwGrenade}
-          onCollectTreasure={collectTreasure}
-          purchaseTerritory={purchaseTerritory}
-          fireTrigger={fireTrigger}
-          missileTrigger={missileTrigger}
-          grenadeTrigger={grenadeTrigger}
-          targetId={targetId}
-        />
-        
-        {activeTab === 'shop' && <Shop user={currentUser} onBuy={buyItem} onClose={() => setActiveTab('map')} />}
-        {activeTab === 'squad' && <Squad user={currentUser} squads={squads} players={players} onClose={() => setActiveTab('map')} />}
-        {activeTab === 'leaderboard' && <Leaderboard squads={squads} onClose={() => setActiveTab('map')} />}
-        {activeTab === 'profile' && <Profile user={currentUser} onSpawnBots={spawnBots} onSpawnTenBots={spawnTenBots} onSpawnTestEntities={spawnTestEntities} onAddCoins={addTestCoins} onClose={() => setActiveTab('map')} />}
-        {activeTab === 'territories' && <Territories user={currentUser} territories={territories} squads={squads} onClose={() => setActiveTab('map')} />}
-      </div>
 
-      {/* Bottom Navigation */}
-      <div className="shrink-0 bg-zinc-950 border-t border-zinc-900 z-[100] pb-[max(env(safe-area-inset-bottom),0.5rem)] relative">
-        <div className="flex justify-around items-center p-1 sm:p-2">
-          <button 
-            onClick={() => setActiveTab('profile')}
-            className={`flex flex-col items-center p-1 sm:p-2 rounded-xl transition-colors min-w-[3.5rem] ${activeTab === 'profile' ? 'text-purple-400' : 'text-zinc-500 hover:text-zinc-300'}`}
-          >
-            <UserCircle className="w-5 h-5 sm:w-6 sm:h-6 mb-1" />
-            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">Profile</span>
-          </button>
-
-          <button 
-            onClick={() => setActiveTab('map')}
-            className={`flex flex-col items-center p-1 sm:p-2 rounded-xl transition-colors min-w-[3.5rem] ${activeTab === 'map' ? 'text-cyan-400' : 'text-zinc-500 hover:text-zinc-300'}`}
-          >
-            <MapIcon className="w-5 h-5 sm:w-6 sm:h-6 mb-1" />
-            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">Map</span>
-          </button>
-          
-          <button 
-            onClick={() => setActiveTab('squad')}
-            className={`flex flex-col items-center p-1 sm:p-2 rounded-xl transition-colors min-w-[3.5rem] ${activeTab === 'squad' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
-          >
-            <Users className="w-5 h-5 sm:w-6 sm:h-6 mb-1" />
-            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">Squad</span>
-          </button>
-
-          <button 
-            onClick={() => setActiveTab('territories')}
-            className={`flex flex-col items-center p-1 sm:p-2 rounded-xl transition-colors min-w-[3.5rem] ${activeTab === 'territories' ? 'text-red-400' : 'text-zinc-500 hover:text-zinc-300'}`}
-          >
-            <Flag className="w-5 h-5 sm:w-6 sm:h-6 mb-1" />
-            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">Zones</span>
-          </button>
-          
-          <button 
-            onClick={() => setActiveTab('shop')}
-            className={`flex flex-col items-center p-1 sm:p-2 rounded-xl transition-colors min-w-[3.5rem] ${activeTab === 'shop' ? 'text-yellow-400' : 'text-zinc-500 hover:text-zinc-300'}`}
-          >
-            <ShoppingCart className="w-5 h-5 sm:w-6 sm:h-6 mb-1" />
-            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">Shop</span>
-          </button>
-
-          <button 
-            onClick={() => setActiveTab('leaderboard')}
-            className={`flex flex-col items-center p-1 sm:p-2 rounded-xl transition-colors min-w-[3.5rem] ${activeTab === 'leaderboard' ? 'text-orange-400' : 'text-zinc-500 hover:text-zinc-300'}`}
-          >
-            <Trophy className="w-5 h-5 sm:w-6 sm:h-6 mb-1" />
-            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">Rank</span>
-          </button>
+      {notification && (
+        <div className={`absolute top-20 left-1/2 -translate-x-1/2 z-[4000] px-6 py-2 rounded-full font-black text-sm shadow-2xl animate-bounce border ${
+          notification.type === 'hit' ? 'bg-red-500 border-red-400 text-white' :
+          notification.type === 'kill' ? 'bg-yellow-500 border-yellow-400 text-black' :
+          notification.type === 'miss' ? 'bg-zinc-800 border-zinc-700 text-white' :
+          'bg-cyan-500 border-cyan-400 text-white'
+        }`}>
+          {notification.message.toUpperCase()}
         </div>
+      )}
+
+      {/* HUD */}
+      <HUD 
+        user={currentUser} 
+        territories={territories}
+        onFire={() => setFireTrigger(p => p + 1)}
+        onFireMissile={() => setMissileTrigger(p => p + 1)}
+        onThrowGrenade={() => setGrenadeTrigger(p => p + 1)}
+        onPurchaseTerritory={purchaseTerritory}
+      />
+
+      {/* MAP */}
+      <GameMap
+        currentUser={currentUser}
+        players={players}
+        treasures={treasures}
+        territories={territories}
+        attacks={attacks}
+        onMapClick={moveTo}
+        onCollectTreasure={collectTreasure}
+        onAttackPlayer={attackPlayer}
+      />
+
+      {/* MODALS */}
+      {activeTab === 'shop' && <Shop user={currentUser} onBuy={buyItem} onClose={() => setActiveTab('map')} />}
+      {activeTab === 'squad' && <Squad user={currentUser} squads={squads} players={players} onCreateSquad={createSquad} onJoinSquad={joinSquad} onLeaveSquad={leaveSquad} onClose={() => setActiveTab('map')} />}
+      {activeTab === 'leaderboard' && <Leaderboard squads={leaderboard} onClose={() => setActiveTab('map')} />}
+      {activeTab === 'profile' && (
+        <Profile 
+          user={currentUser} 
+          onSpawnBots={spawnBots}
+          onSpawnTenBots={spawnTenBots}
+          onSpawnTestEntities={spawnTestEntities}
+          onAddCoins={addTestCoins}
+          onUpdateAvatar={updateAvatar} 
+          onClose={() => setActiveTab('map')} 
+        />
+      )}
+      {activeTab === 'territories' && <Territories user={currentUser} territories={territories} squads={squads} onClose={() => setActiveTab('map')} />}
+
+      {/* NAV */}
+      <div className="bg-zinc-900 flex justify-around p-2">
+        <button onClick={() => setActiveTab('map')}><MapIcon /></button>
+        <button onClick={() => setActiveTab('squad')}><Users /></button>
+        <button onClick={() => setActiveTab('territories')}><Flag /></button>
+        <button onClick={() => setActiveTab('shop')}><ShoppingCart /></button>
+        <button onClick={() => setActiveTab('leaderboard')}><Trophy /></button>
+        <button onClick={() => setActiveTab('profile')}><UserCircle /></button>
       </div>
+
     </div>
   );
 }

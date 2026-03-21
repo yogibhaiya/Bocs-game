@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User } from '../types';
-import { Heart, Crosshair, Coins, Shield, EyeOff, Rocket, Bomb, Map as MapIcon } from 'lucide-react';
+import { User, Territory } from '../types';
+import { Heart, Crosshair, Coins, Shield, EyeOff, Rocket, Bomb, Map as MapIcon, Flag } from 'lucide-react';
+import { isPointWithinRadius } from 'geolib';
 
 interface HUDProps {
   user: User;
+  territories: Territory[];
   onFire: () => void;
   onFireMissile: () => void;
   onThrowGrenade: () => void;
+  onPurchaseTerritory: () => void;
 }
 
-export default function HUD({ user, onFire, onFireMissile, onThrowGrenade }: HUDProps) {
+export default function HUD({ user, territories, onFire, onFireMissile, onThrowGrenade, onPurchaseTerritory }: HUDProps) {
   const [isShaking, setIsShaking] = useState(false);
   const lastHealth = useRef(user.health);
 
@@ -24,6 +27,14 @@ export default function HUD({ user, onFire, onFireMissile, onThrowGrenade }: HUD
 
   const isShielded = user.shieldUntil && new Date(user.shieldUntil) > new Date();
   const isInvisible = user.invisibleUntil && new Date(user.invisibleUntil) > new Date();
+
+  // Check if player is inside any territory
+  const currentTerritory = territories.find(t => 
+    isPointWithinRadius({ latitude: user.lat, longitude: user.lng }, { latitude: t.lat, longitude: t.lng }, t.radius)
+  );
+
+  const canCapture = user.squadId && user.squadId !== 'general' && currentTerritory && currentTerritory.ownerSquadId !== user.squadId;
+  const canPurchase = user.squadId && user.squadId !== 'general' && !currentTerritory;
 
   return (
     <div className={`fixed top-0 left-0 w-full h-full p-4 pt-[max(1rem,env(safe-area-inset-top))] pointer-events-none z-[9999] flex flex-col justify-between transition-transform duration-75 ${isShaking ? 'translate-x-1 translate-y-1' : ''}`}>
@@ -91,6 +102,30 @@ export default function HUD({ user, onFire, onFireMissile, onThrowGrenade }: HUD
 
       {/* Fire Buttons */}
       <div className="flex justify-end items-end gap-4 sm:gap-6 pb-24 sm:pb-32 pr-4 sm:pr-8">
+        {/* Territory Purchase/Capture */}
+        {(canPurchase || canCapture) && (
+          <div className="flex flex-col items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onPurchaseTerritory();
+              }}
+              disabled={user.health <= 0 || (canPurchase && user.coins < 500) || (canCapture && user.coins < 1000)}
+              className={`pointer-events-auto group relative flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full border-4 shadow-[0_0_30px_rgba(16,185,129,0.5)] active:scale-95 transition-all disabled:opacity-50 disabled:grayscale disabled:scale-100 ${
+                canCapture ? 'bg-emerald-600 border-emerald-900' : 'bg-cyan-600 border-cyan-900'
+              }`}
+            >
+              <div className={`absolute inset-0 rounded-full animate-pulse opacity-20 group-hover:opacity-40 ${
+                canCapture ? 'bg-emerald-500' : 'bg-cyan-500'
+              }`} />
+              <Flag className="w-8 h-8 sm:w-10 h-10 text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
+            </button>
+            <span className={`${canCapture ? 'text-emerald-500' : 'text-cyan-500'} font-black text-[10px] tracking-widest uppercase drop-shadow-[0_0_5px_rgba(16,185,129,0.5)]`}>
+              {canCapture ? 'Capture' : 'Purchase'}
+            </span>
+          </div>
+        )}
+
         {/* Standard Weapon */}
         <div className="flex flex-col items-center gap-2">
           <button

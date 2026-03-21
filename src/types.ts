@@ -9,7 +9,7 @@ export interface Attack {
   toLat: number;
   toLng: number;
   timestamp: any;
-  type?: 'bullet' | 'missile' | 'grenade';
+  type?: 'bullet' | 'missile' | 'grenade' | 'assault';
 }
 
 export interface User {
@@ -22,14 +22,18 @@ export interface User {
   health: number;
   ammo: number;
   coins: number;
-  squadId?: string;
+  squadId: string;
   gunQuality: GunQuality;
-  shieldUntil?: string;
-  invisibleUntil?: string;
+  hasAssaultRifle: boolean;
   autoMissiles: number;
   grenades: number;
   territoryCount: number;
   onlineStatus: boolean;
+  kills: number;
+  deaths: number;
+  tutorialCompleted?: boolean;
+  shieldUntil?: string;
+  invisibleUntil?: string;
 }
 
 export interface Squad {
@@ -48,14 +52,21 @@ export interface Treasure {
   lng: number;
   coins: number;
   active: boolean;
-  createdAt: string;
 }
 
 export interface Territory {
   id: string;
   ownerId: string;
-  ownerSquadId: string;
+  ownerSquadId?: string;
   lat: number;
   lng: number;
-  createdAt: string;
+  radius: number;
+  color: string;
+}
+
+export interface LeaderboardEntry {
+  uid: string;
+  displayName: string;
+  kills: number;
+  territories: number;
 }

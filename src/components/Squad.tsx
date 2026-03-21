@@ -1,74 +1,49 @@
 import React, { useState } from 'react';
 import { User, Squad as SquadType } from '../types';
 import { Users, Plus, LogOut } from 'lucide-react';
-import { doc, setDoc, updateDoc, collection } from 'firebase/firestore';
-import { db } from '../firebase';
-import { handleFirestoreError, OperationType } from '../hooks/useGameData';
 
 interface SquadProps {
   user: User;
   squads: SquadType[];
   players: User[];
   onClose: () => void;
+  onCreateSquad: (name: string, avatarUrl: string) => void;
+  onJoinSquad: (squadId: string) => void;
+  onLeaveSquad: () => void;
   hideClose?: boolean;
 }
 
 const SQUAD_AVATARS = ['🥷', '🧙‍♂️', '🧟', '🤖', '👽', '🤠', '🧛', '🦸‍♂️', '🦹', '👮'];
 
-export default function Squad({ user, squads, players, onClose, hideClose }: SquadProps) {
+export default function Squad({ 
+  user, 
+  squads, 
+  players, 
+  onClose, 
+  onCreateSquad, 
+  onJoinSquad, 
+  onLeaveSquad, 
+  hideClose 
+}: SquadProps) {
   const [newSquadName, setNewSquadName] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(SQUAD_AVATARS[0]);
 
   const mySquad = squads.find(s => s.id === user.squadId);
   const squadMembers = players.filter(p => p.squadId === mySquad?.id);
 
-  const createSquad = async () => {
+  const handleCreateSquad = () => {
     if (!newSquadName.trim()) return;
-    const newId = `squad_${Date.now()}`;
-    
-    try {
-      await setDoc(doc(db, 'squads', newId), {
-        id: newId,
-        name: newSquadName,
-        leaderId: user.uid,
-        score: 0,
-        avatarUrl: selectedAvatar
-      });
-
-      await updateDoc(doc(db, 'users', user.uid), {
-        squadId: newId
-      });
-      
-      setNewSquadName('');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, `squads/${newId}`);
-    }
+    onCreateSquad(newSquadName, selectedAvatar);
+    setNewSquadName('');
   };
 
-  const joinSquad = async (squadId: string) => {
+  const handleJoinSquad = (squadId: string) => {
     const targetSquadMembers = players.filter(p => p.squadId === squadId);
     if (targetSquadMembers.length >= 6) {
       alert("Squad is full (max 6 players)");
       return;
     }
-
-    try {
-      await updateDoc(doc(db, 'users', user.uid), {
-        squadId
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
-    }
-  };
-
-  const leaveSquad = async () => {
-    try {
-      await updateDoc(doc(db, 'users', user.uid), {
-        squadId: null
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
-    }
+    onJoinSquad(squadId);
   };
 
   return (
@@ -93,7 +68,7 @@ export default function Squad({ user, squads, players, onClose, hideClose }: Squ
               <h3 className="text-xl font-bold text-white">{mySquad.name}</h3>
               <p className="text-emerald-400 font-mono">Score: {mySquad.score}</p>
             </div>
-            <button onClick={leaveSquad} className="p-2 text-red-400 hover:bg-red-400/10 rounded-lg">
+            <button onClick={onLeaveSquad} className="p-2 text-red-400 hover:bg-red-400/10 rounded-lg">
               <LogOut className="w-5 h-5" />
             </button>
           </div>
@@ -149,7 +124,7 @@ export default function Squad({ user, squads, players, onClose, hideClose }: Squ
                 className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500"
               />
               <button
-                onClick={createSquad}
+                onClick={handleCreateSquad}
                 disabled={!newSquadName.trim()}
                 className="bg-emerald-500 text-zinc-950 px-6 py-2 rounded-lg font-bold disabled:opacity-50 flex items-center gap-2"
               >
@@ -175,7 +150,7 @@ export default function Squad({ user, squads, players, onClose, hideClose }: Squ
                       </div>
                     </div>
                     <button
-                      onClick={() => joinSquad(squad.id)}
+                      onClick={() => handleJoinSquad(squad.id)}
                       disabled={memberCount >= 6}
                       className="px-4 py-2 bg-zinc-800 text-white rounded-lg font-bold text-sm hover:bg-zinc-700 disabled:opacity-50"
                     >

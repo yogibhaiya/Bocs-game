@@ -19,15 +19,21 @@ export default function Territories({ user, territories, squads, onClose }: Terr
         <button onClick={onClose} className="text-zinc-500 hover:text-white font-bold">CLOSE</button>
       </div>
 
-      {!user.squadId ? (
+      {user.squadId === 'general' || !user.squadId ? (
         <div className="text-center text-zinc-500 mt-10">
-          <p>You must join a squad to view and capture territories.</p>
+          <p className="mb-4">You must join a squad to view and capture territories.</p>
+          <p className="text-xs">Go to the SQUAD tab to create or join one.</p>
         </div>
       ) : (
         <>
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 mb-6">
             <h3 className="text-emerald-400 font-bold mb-2">Your Squad: {userSquad?.name}</h3>
-            <p className="text-zinc-400 text-sm">Territories Controlled: <span className="text-white font-mono">{myTerritories.length}</span></p>
+            <p className="text-zinc-400 text-sm mb-4">Territories Controlled: <span className="text-white font-mono">{myTerritories.length}</span></p>
+            <div className="p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
+              <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-black mb-1">How to Capture</p>
+              <p className="text-xs text-zinc-400">Move to an unclaimed area or an enemy territory. A <span className="text-cyan-400 font-bold">PURCHASE</span> or <span className="text-emerald-400 font-bold">CAPTURE</span> button will appear on your HUD.</p>
+              <p className="text-[10px] text-zinc-600 mt-2 font-mono">New: 500 BC | Capture: 1000 BC</p>
+            </div>
           </div>
 
           <h3 className="text-lg font-bold text-white mb-4">All Territories</h3>
